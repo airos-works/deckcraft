@@ -1,0 +1,39 @@
+[package]
+name = "deckcraft-haiku"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "DeckCraft for air/OS and Haiku: the egui front end in a native BWindow"
+
+# Not the workspace's lints: the native host is reached through `unsafe` FFI, confined to
+# `src/host.rs` (`#[allow(unsafe_code)]` there). Everything else denies it.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+# clippy.toml bans `Instant::now`, which traps on wasm; this crate is Haiku only (its event loop
+# times frames and repaints).
+disallowed_methods = "allow"
+
+[[bin]]
+name = "DeckCraft"
+path = "src/main.rs"
+
+[dependencies]
+deckcraft-media = { workspace = true }
+deckcraft-engine = { workspace = true }
+deckcraft-ui-egui = { workspace = true }
+egui = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+rayon = { workspace = true }
+# Pictures copied to the clipboard as PNG (egui's CopyImage).
+image = { workspace = true }
+
+[build-dependencies]
+cc = "1"

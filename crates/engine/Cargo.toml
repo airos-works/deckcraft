@@ -34,3 +34,6 @@ zip = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 
+
+[target.'cfg(target_os = "haiku")'.dependencies]
+rustix = { version = "1", features = ["fs"] }

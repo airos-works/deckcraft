@@ -1,0 +1,30 @@
+// DeckCraft's Haiku resources: signature, launch behaviour, version, icon and
+// the presentation types Tracker offers it for. Compiled with rc and added with
+// xres by tools/haiku/package.sh.
+
+resource app_signature "application/x-vnd.storytold-DeckCraft";
+
+// Each presentation opened from Tracker starts a window of its own process, as on
+// the other desktops; files opened while it runs arrive as B_REFS_RECEIVED.
+resource app_flags B_MULTIPLE_LAUNCH;
+
+resource app_version {
+	major = 0,
+	middle = 7,
+	minor = 0,
+	variety = B_APPV_DEVELOPMENT,
+	internal = 1,
+	short_info = "DeckCraft 0.7.0",
+	long_info = "DeckCraft for air/OS: an open-source presentation editor (MIT or Apache-2.0)."
+};
+
+resource vector_icon {
+	import "DeckCraft.hvif"
+};
+
+resource file_types message {
+    "types" = "application/x-deckcraft",
+    "types" = "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "types" = "application/vnd.openxmlformats-officedocument.presentationml.template",
+    "types" = "application/vnd.openxmlformats-officedocument.presentationml.slideshow"
+};

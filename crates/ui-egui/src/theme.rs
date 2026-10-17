@@ -190,6 +190,15 @@ pub fn font_definitions(extra: &[std::sync::Arc<deckcraft_fonts::FontFace>]) -> 
     let mut bold: Vec<String> = names.iter().filter(|(fam, st, _)| *fam == "Inter" && *st == "SemiBold").map(|(_, _, n)| n.clone()).collect();
     bold.extend(defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default());
     defs.families.insert(FontFamily::Name("bold".into()), bold);
+    #[cfg(target_os = "haiku")]
+    for (file, key, family) in
+        [("NotoSans-Regular.ttf", "haiku-ui", FontFamily::Proportional), ("NotoSans-Bold.ttf", "haiku-ui-bold", FontFamily::Name("bold".into()))]
+    {
+        if let Ok(bytes) = std::fs::read(std::path::Path::new("/boot/system/data/fonts/ttfonts").join(file)) {
+            defs.font_data.insert(key.into(), std::sync::Arc::new(FontData::from_owned(bytes)));
+            defs.families.entry(family).or_default().insert(0, key.into());
+        }
+    }
     add_fallback_faces(&mut defs, extra);
     // The Japanese interface face (the first one when Inter isn't embedded) hints its en and em
     // dashes, bars thinner than a pixel, down to nothing, so they drew as gaps in interface text;

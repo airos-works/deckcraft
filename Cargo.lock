@@ -969,6 +969,7 @@ dependencies = [
  "image",
  "js-sys",
  "log",
+ "rustix 1.1.5",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1013,6 +1014,21 @@ dependencies = [
  "deckcraft-bitstream",
  "rayon",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckcraft-haiku"
+version = "0.7.0"
+dependencies = [
+ "cc",
+ "deckcraft-engine",
+ "deckcraft-media",
+ "deckcraft-ui-egui",
+ "egui",
+ "image",
+ "log",
+ "rayon",
+ "serde_json",
 ]
 
 [[package]]

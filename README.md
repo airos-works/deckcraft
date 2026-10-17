@@ -1,11 +1,8 @@
-<p align="center">
-  <a href="https://getartcraft.com/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/brand/artcraft-logo-white.svg">
-      <img alt="ArtCraft" src="docs/brand/artcraft-logo.svg" width="200">
-    </picture>
-  </a>
-</p>
+# DeckCraft for air/OS
+
+This fork ports DeckCraft to air/OS using Be API windows, file panels, clipboard, cursors,
+MIME integration and Media Kit audio. It is based on DeckCraft by the ArtCraft team.
+See [building and using the air/OS port](docs/haiku.md).
 
 <h1 align="center">DeckCraft</h1>
 
@@ -287,8 +284,3 @@ part of this repository and DeckCraft, under [`docs/brand/LICENSE-brand.txt`](do
 Forks and modified versions must remove them.
 
 <sub>Microsoft and PowerPoint are trademarks of the Microsoft group of companies. Adobe, Photoshop, Illustrator, Premiere Pro, Lightroom, Acrobat, After Effects and InDesign are trademarks or registered trademarks of Adobe Inc. in the United States and/or other countries. DeckCraft is an independent, open-source project and is not affiliated with, sponsored by or endorsed by Microsoft Corporation or Adobe Inc.; these names are used only to describe the workflows it is compatible with.</sub>
-
-<p align="center">
-  <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
-  <sub>Made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
-</p>

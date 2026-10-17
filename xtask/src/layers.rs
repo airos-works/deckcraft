@@ -64,6 +64,7 @@ pub const TABLE: &[(&str, Class)] = &[
     // L7 apps and tooling
     ("deckcraft", Class::Exempt),
     ("cli", Class::Exempt),
+    ("haiku", Class::Exempt),
     ("web", Class::Exempt),
     ("xtask", Class::Exempt),
 ];

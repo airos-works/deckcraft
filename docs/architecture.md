@@ -1,5 +1,8 @@
 # DeckCraft architecture
 
+**air/OS fork update, 2026-10-18:** native Be API host, CPU rendering, native file panels,
+clipboard and Media Kit sound. Build instructions and port limitations: [air/OS port](haiku.md).
+
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (community PR wave 2026-10-14: 320 engine commands, 41 dialogs, the `metafile` crate, 1,641 tests; duplicated L2/L5/L6 rows and headers folded; previous: minor, transition frames) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft is built today. The binding rules (layering, everything is a command, thin UI, never

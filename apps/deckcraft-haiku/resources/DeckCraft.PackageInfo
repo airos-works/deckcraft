@@ -1,0 +1,23 @@
+name deckcraft
+version 0.7.0~airos1-3
+architecture x86_64
+summary "Presentation editor and slide shows"
+description "DeckCraft for air/OS is based on DeckCraft by the ArtCraft team. Edit presentations, open and save PPTX, export PDF and images, and present full-screen slide shows. The native Be API host provides windows, file panels, clipboard, cursors and Media Kit sound."
+packager "DeckCraft for air/OS"
+vendor "storytold"
+copyrights { "2026 DeckCraft contributors" }
+licenses { "MIT" "Apache v2" }
+urls { "https://github.com/jmgasper/deckcraft" }
+provides {
+	deckcraft = 0.7.0
+	app:DeckCraft = 0.7.0
+}
+requires {
+	haiku >= r1~beta6
+	lib:libstdc++
+	lib:libgcc_s
+}
+
+post-install-scripts {
+    "boot/post-install/deckcraft.sh"
+}

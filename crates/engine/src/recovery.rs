@@ -28,6 +28,9 @@ pub fn default_dir() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
         return home.map(|h| h.join("Library/Application Support/DeckCraft/Recovery"));
     }
+    if cfg!(target_os = "haiku") {
+        return home.map(|h| h.join("config/settings/DeckCraft/Recovery"));
+    }
     if cfg!(target_os = "windows") {
         return std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("DeckCraft").join("Recovery"));
     }
@@ -54,6 +57,22 @@ pub fn instance_id() -> u64 {
     })
 }
 
+// Reused from WordCraft: Rust std does not implement file locking on Haiku.
+#[cfg(not(target_os = "haiku"))]
+fn try_lock(file: &File) -> std::result::Result<(), std::fs::TryLockError> {
+    file.try_lock()
+}
+#[cfg(target_os = "haiku")]
+fn try_lock(file: &File) -> std::result::Result<(), std::fs::TryLockError> {
+    match rustix::fs::flock(file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+        Ok(()) => Ok(()),
+        Err(e) => match std::io::Error::from(e) {
+            e if e.kind() == std::io::ErrorKind::WouldBlock => Err(std::fs::TryLockError::WouldBlock),
+            e => Err(std::fs::TryLockError::Error(e)),
+        },
+    }
+}
+
 fn lock_path(dir: &Path, owner: u64) -> PathBuf {
     dir.join(format!("owner-{owner}.lock"))
 }
@@ -66,7 +85,7 @@ fn claim_dir(dir: &Path) {
         return;
     }
     let path = lock_path(dir, instance_id());
-    match File::create(&path).and_then(|f| f.try_lock().map(|()| f).map_err(std::io::Error::other)) {
+    match File::create(&path).and_then(|f| try_lock(&f).map(|()| f).map_err(std::io::Error::other)) {
         Ok(f) => held.push((dir.to_path_buf(), f)),
         Err(e) => log::warn!("recovery: could not lock {}: {e}", path.display()),
     }
@@ -75,7 +94,7 @@ fn claim_dir(dir: &Path) {
 /// Whether another running instance holds `owner`'s lock in `dir`.
 fn owner_alive(dir: &Path, owner: u64) -> bool {
     let Ok(f) = File::open(lock_path(dir, owner)) else { return false };
-    matches!(f.try_lock(), Err(std::fs::TryLockError::WouldBlock))
+    matches!(try_lock(&f), Err(std::fs::TryLockError::WouldBlock))
 }
 
 /// Write `bytes` to `path` through a temporary file and a rename, so a crash never leaves it torn.
@@ -290,7 +309,7 @@ mod tests {
         // Another instance (its own owner id and uid, its lock held) has an unsaved presentation.
         let other = instance_id() ^ (1 << 40);
         let lock = File::create(lock_path(&dir, other)).unwrap();
-        lock.try_lock().unwrap();
+        try_lock(&lock).unwrap();
         let mut o = Session::new();
         o.execute("file.new", &json!({})).unwrap();
         o.execute("slide.new", &json!({"layout": "blank"})).unwrap();

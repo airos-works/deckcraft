@@ -80,3 +80,8 @@ Code dependencies
   (https://github.com/saucecontrol/Compact-ICC-Profiles) are CC0-1.0; the profile
   licence is retained in licenses/pdf-writer/LICENSE-ICC.txt and exact files, sources
   and hashes are in ATTRIBUTION.md.
+
+The air/OS host and build tooling adapt code from jmgasper/gridcraft and
+jmgasper/wordcraft, under MIT OR Apache-2.0, copyright 2026 their contributors.
+The HVIF encoder (tools/haiku/hvif.py) comes from jmgasper/burrow, copyright
+2026 Burrow contributors, under the MIT licence (same terms as LICENSE-MIT).

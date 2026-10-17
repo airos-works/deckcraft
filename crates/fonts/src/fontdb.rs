@@ -513,6 +513,12 @@ pub fn system_font_dirs() -> Vec<std::path::PathBuf> {
             // DeckCraft never ships or needs them.
             dirs.push(l.join("Microsoft\\FontCache\\4\\CloudFonts"));
         }
+    } else if cfg!(target_os = "haiku") {
+        dirs.extend(["/boot/system/data/fonts", "/boot/system/non-packaged/data/fonts"].map(Into::into));
+        if let Some(h) = &home {
+            dirs.push(h.join("config/data/fonts"));
+            dirs.push(h.join("config/non-packaged/data/fonts"));
+        }
     } else {
         dirs.extend(["/usr/share/fonts", "/usr/local/share/fonts"].map(Into::into));
         if let Some(h) = &home {
@@ -1019,6 +1025,10 @@ impl FontDb {
             if let Some(f) = self.try_family(sub, style) {
                 return f;
             }
+        }
+        #[cfg(target_os = "haiku")]
+        if let Some(f) = self.try_family("Noto Sans", style) {
+            return f;
         }
         self.find(LAST_RESORT_FAMILY, "Regular")
             .or_else(|| self.find(FALLBACK_FAMILY, "Regular"))

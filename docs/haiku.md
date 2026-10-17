@@ -1,0 +1,106 @@
+# DeckCraft on air/OS
+
+Status: initial x86_64 port, validated on the air/OS laptop on 2026-10-18.
+
+This fork runs the existing DeckCraft presentation editor and engine inside a native Be API
+host. It reuses GridCraft's and WordCraft's air/OS window, input and software rendering code,
+and WordCraft's recovery owner-lock fix. No sibling repository is needed to build it.
+
+| Service | air/OS implementation |
+| --- | --- |
+| Window and event loop | `BApplication`, `BWindow`, `BView` |
+| Drawing | egui triangles rasterized on the CPU, displayed in a `BBitmap`; dirty bands and HiDPI support |
+| Open / Save / insert media | `BFilePanel` |
+| Clipboard | `BClipboard`, text, HTML and PNG |
+| Cursors / locale / document types | `BCursor`, `BLocaleRoster`, `BMimeType` |
+| Slide show | Native borderless fullscreen on the current display; restores the editor's frame |
+| Audio | `BSoundPlayer` (Media Kit), stereo float PCM; DeckCraft's existing decoder and mixer |
+| Recovery | Haiku `flock` through rustix; other running instances keep their snapshots |
+
+The full ribbon, slide canvas, thumbnails, notes, editing commands, PPTX and `.deckcraft`
+formats, PDF/image export, transitions and animations are the upstream Rust implementation.
+The platform host replaces eframe/winit/wgpu and cpal. The only unsafe Rust is the reviewed
+native boundary in `apps/deckcraft-haiku/src/host.rs`; the rest denies unsafe code. C++ is
+limited to the Be API boundary, following the existing sibling ports.
+
+Settings and logs live under `~/config/settings/DeckCraft`, recovery under `Recovery/`.
+Fonts are discovered in the system and user `data/fonts` folders. The interface prefers
+installed Noto Sans; no fonts are bundled. Control and Command (left Alt by default) both
+map to Ctrl-style editing shortcuts. Option maps to Alt. The native window's close button
+honors the editor's Save Changes prompt.
+
+## Build
+
+Use the existing Linux cross toolchain and air/OS development sysroot:
+
+```sh
+bash tools/haiku/build.sh
+bash tools/haiku/package.sh --no-build
+```
+
+Output: `target/x86_64-unknown-haiku/release/DeckCraft` and
+`artifacts/haiku/deckcraft-0.7.0~airos1-3-x86_64.hpkg`.
+
+`tools/haiku/env.sh` sets defaults for this workspace. Override `RUSTUP_HOME`, `CARGO_HOME`,
+`HAIKU_SYSROOT`, `HAIKU_CROSS`, `CARGO_TARGET_DIR`, and `HAIKU_HOST_TOOLS` for other machines.
+Rust must satisfy the workspace version and include `rust-src`. The tier-3 Haiku target uses
+`-Zbuild-std=std,panic_abort` with `RUSTC_BOOTSTRAP=1`, as the sibling ports do.
+The host tools directory must contain `rc/rc`, `xres`, `resattr/resattr`, and `package/package`.
+The package can be built entirely on Linux; its resources include DeckCraft's own icon
+converted from the original SVG to HVIF by `tools/haiku/make-icon.py`.
+
+Install the package using `pkgman install <package path>`. DeckCraft appears in the Deskbar's
+Applications menu. The post-install script registers it for PPTX/POTX/PPSX and `.deckcraft`
+where no preferred application has already been chosen.
+
+```sh
+DeckCraft --sample
+DeckCraft --sample --show
+DeckCraft --control 7990 /boot/home/talk.pptx
+```
+
+The optional localhost control channel is unchanged; see [control-protocol.md](control-protocol.md).
+`DECKCRAFT_DEVICE_SCALE` overrides display density; `DECKCRAFT_NO_AUDIO` disables audio;
+`DECKCRAFT_NO_PREFS` and `DECKCRAFT_NO_RECOVERY` are useful for isolated validation runs.
+
+## Validation
+
+Run `cargo xtask ci` on Linux for the upstream checks and the portable host tests, and
+`bash tools/haiku/build.sh` for the actual native ABI. The rasterizer and input mapping tests
+also run independently with `cargo test -p deckcraft-haiku`.
+
+Validated on the laptop with the installed package:
+
+- Sample slides render at the desktop's 175% density, with installed Noto Sans.
+- Editing, PPTX save/reopen, PDF and PNG exports, native document-open messages and file panel cancellation.
+- Fullscreen starts on the window's monitor; next-slide navigation and Escape restore the editor's frame.
+- Closing a dirty document prompts to save, including when closing during a show.
+- WAV playback advances through Media Kit's audio callback without an error (silent PCM used for the automated test).
+- Two live instances do not recover each other's unsaved work; after the owner exits, its text is recovered and can be saved.
+- Package installation registers the app, icon, Deskbar entry and `.deckcraft` extension.
+
+Linux checks need ALSA development files. A font covering CJK (BIZ UDPGothic, OFL) is needed
+for the upstream vertical-text rendering test. The upstream notes-spelling UI test can fail
+under parallel test execution; it passes in isolation. Run the suite with `RUST_TEST_THREADS=1`
+for deterministic verification on this build host. The native Clippy check needs
+`-A clippy::missing_const_for_thread_local` with this Rust 1.99 Haiku std build, which otherwise
+reports that lint on an upstream thread-local initializer that is already `const`.
+
+The final Linux run passed all seven `cargo xtask ci` gates, with 1,696 tests passing,
+0 failures and 6 ignored tests. The native cross-build, native Clippy check (with the
+single toolchain exception above), asset/layer checks and WebAssembly checks also passed.
+
+## Initial limitations
+
+- CPU rendering; large HiDPI windows and complex animated slides can be expensive.
+- Presenter view is embedded in the main window; a separate second-monitor presenter window
+  is not implemented yet. Presenter view starts disabled to keep audience slides unobstructed.
+- Native IME composition is not forwarded yet; ordinary keyboard input and pasted Unicode work.
+- Native direct printing is not implemented; export a PDF to print through a PDF viewer.
+- Window geometry is not persisted, and the host does not expose native accessibility nodes.
+- Clipboard images currently accept PNG data, not archived native `BBitmap` messages.
+- This is the upstream alpha editor: its remaining format and editing limitations still apply.
+
+## Revision history
+
+- 2026-10-18: initial Be API port, cross-build and package tooling.
