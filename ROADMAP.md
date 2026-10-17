@@ -2,6 +2,7 @@
 
 **air/OS fork update, 2026-10-18:** native Be API host, CPU rendering, native file panels,
 clipboard and Media Kit sound. Build instructions and port limitations: [air/OS port](docs/haiku.md).
+Package revision 4 adds the executable MIME type required to retain files opened from Tracker during launch.
 
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 

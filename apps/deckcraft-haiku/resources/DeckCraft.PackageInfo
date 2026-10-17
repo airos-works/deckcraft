@@ -1,5 +1,5 @@
 name deckcraft
-version 0.7.0~airos1-3
+version 0.7.0~airos1-4
 architecture x86_64
 summary "Presentation editor and slide shows"
 description "DeckCraft for air/OS is based on DeckCraft by the ArtCraft team. Edit presentations, open and save PPTX, export PDF and images, and present full-screen slide shows. The native Be API host provides windows, file panels, clipboard, cursors and Media Kit sound."

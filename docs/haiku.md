@@ -39,7 +39,7 @@ bash tools/haiku/package.sh --no-build
 ```
 
 Output: `target/x86_64-unknown-haiku/release/DeckCraft` and
-`artifacts/haiku/deckcraft-0.7.0~airos1-3-x86_64.hpkg`.
+`artifacts/haiku/deckcraft-0.7.0~airos1-4-x86_64.hpkg`.
 
 `tools/haiku/env.sh` sets defaults for this workspace. Override `RUSTUP_HOME`, `CARGO_HOME`,
 `HAIKU_SYSROOT`, `HAIKU_CROSS`, `CARGO_TARGET_DIR`, and `HAIKU_HOST_TOOLS` for other machines.
@@ -48,6 +48,9 @@ Rust must satisfy the workspace version and include `rust-src`. The tier-3 Haiku
 The host tools directory must contain `rc/rc`, `xres`, `resattr/resattr`, and `package/package`.
 The package can be built entirely on Linux; its resources include DeckCraft's own icon
 converted from the original SVG to HVIF by `tools/haiku/make-icon.py`.
+The resources also include `BEOS:TYPE = application/x-vnd.Be-elfexecutable`,
+which must survive into the package's attributes. Without it, Haiku treats the
+binary as a script and can lose Tracker's initial document-open message.
 
 Install the package using `pkgman install <package path>`. DeckCraft appears in the Deskbar's
 Applications menu. The post-install script registers it for PPTX/POTX/PPSX and `.deckcraft`
@@ -103,4 +106,8 @@ single toolchain exception above), asset/layer checks and WebAssembly checks als
 
 ## Revision history
 
+- 2026-10-18: package revision 4 supplies the executable MIME type so files opened
+  from Tracker launch directly into the editor. Test the actual Tracker launch;
+  passing a filename on the command line or sending refs to an existing process
+  does not exercise application pre-registration.
 - 2026-10-18: initial Be API port, cross-build and package tooling.
