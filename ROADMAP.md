@@ -1,5 +1,7 @@
 # DeckCraft roadmap
 
+**air/OS icon update, 2026-10-26:** original Haiku-style native vector icon, with reproducible HVIF/SVG generation and a package revision bump. Validated with Haiku resource compilation and native renders from 16 to 256px; see [native icon](docs/haiku.md#native-application-icon-2026-10-26).
+
 **air/OS fork update, 2026-10-18:** native Be API host, CPU rendering, native file panels,
 clipboard and Media Kit sound. Build instructions and port limitations: [air/OS port](docs/haiku.md).
 Package revision 4 adds the executable MIME type required to retain files opened from Tracker during launch.

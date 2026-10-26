@@ -1,37 +1,22 @@
 #!/usr/bin/env python3
-"""Convert DeckCraft's original SVG rectangles/circle into a 64-unit Haiku vector icon."""
-from pathlib import Path
-import xml.etree.ElementTree as ET
-import hvif
+"""Original Haiku presentation screen. Rebuild with python3 tools/haiku/make-icon.py."""
+from icon_art import Drawing, INK, plane
 
-root = Path(__file__).resolve().parents[2]
-svg = ET.parse(root / 'assets/app-icon/hicolor/scalable/apps/ai.storyteller.deckcraft.svg')
-icon = {'styles': [], 'paths': [], 'shapes': []}
-
-def rounded(x, y, w, h, r):
-    k = r * 0.55228475
-    return [((x+r,y),(x+r-k,y),(x+r,y)), ((x+w-r,y),(x+w-r,y),(x+w-r+k,y)),
-            ((x+w,y+r),(x+w,y+r-k),(x+w,y+r)), ((x+w,y+h-r),(x+w,y+h-r),(x+w,y+h-r+k)),
-            ((x+w-r,y+h),(x+w-r+k,y+h),(x+w-r,y+h)), ((x+r,y+h),(x+r,y+h),(x+r-k,y+h)),
-            ((x,y+h-r),(x,y+h-r+k),(x,y+h-r)), ((x,y+r),(x,y+r),(x,y+r-k))]
-
-for elem in svg.getroot():
-    a = elem.attrib
-    if elem.tag.endswith('rect'):
-        x,y,w,h = [float(a.get(key,0))/8 for key in ('x','y','width','height')]
-        r = float(a.get('rx',0))/8
-        points = rounded(x,y,w,h,r) if r else [(x,y),(x+w,y),(x+w,y+h),(x,y+h)]
-    elif elem.tag.endswith('circle'):
-        x,y,r = [float(a[key])/8 for key in ('cx','cy','r')]
-        points = rounded(x-r,y-r,2*r,2*r,r)
-    else:
-        raise ValueError('unsupported SVG element: '+elem.tag)
-    path = len(icon['paths']); icon['paths'].append({'closed':True,'points':points})
-    for attr in ('fill','stroke'):
-        if attr not in a: continue
-        style = len(icon['styles']); icon['styles'].append({'color':hvif.hex_color(a[attr])})
-        transforms = [] if attr=='fill' else [{'type':'stroke','width':float(a['stroke-width'])/8,'join':2,'cap':0,'miter':4}]
-        icon['shapes'].append({'style':style,'paths':[path],'transformers':transforms})
-out = root / 'apps/deckcraft-haiku/resources/DeckCraft.hvif'
-out.write_bytes(hvif.encode(icon))
-print(out)
+d = Drawing()
+p = plane(7, 7, 0.25)
+d.shadow([(18,51),(34,59),(61,59),(46,51)])
+# Tripod, with floor-contact edges in the BeOS 2:1 / 1:1 directions.
+d.line([(29,38),(29,54)], INK, 4)
+d.line([(29,51),(17,57)], INK, 3)
+d.line([(29,51),(43,58)], INK, 3)
+d.line([(29,51),(37,43)], INK, 3)
+d.line([(29,39),(29,51)], 'c4cbd1', 1.8)
+d.shape([(47,16),(51,12),(51,42),(47,46)], d.gradient('b3a196','6d5e59'), INK)
+d.shape(p([(0,0),(40,0),(40,29),(0,29)]), d.gradient('fffff4','dddcd5'), INK)
+d.shape(p([(-1,-1),(41,-1),(41,3),(-1,3)]), d.gradient('f5cc98','b97a46'), INK)
+d.shape(p([(-1,27),(41,27),(41,30),(-1,30)]), d.gradient('d0c4b5','8e8176'), INK, 1.5)
+d.line(p([(5,8),(24,8)]), 'b36c40', 2.5)
+for u, v in [(6,18),(15,14),(24,10)]:
+    d.shape(p([(u,v),(u+6,v),(u+6,24),(u,24)]), d.gradient('f1b57b','bf6b3e'))
+d.line(p([(33,7),(33,22)]), '94918b', 1.4)
+d.save(__file__, 'deckcraft', 'DeckCraft')
