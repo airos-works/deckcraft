@@ -31,6 +31,8 @@ deckcraft-ui-egui = { workspace = true }
 egui = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
+# The shared logging module's UTC timestamps.
+chrono = { workspace = true }
 rayon = { workspace = true }
 # Pictures copied to the clipboard as PNG (egui's CopyImage).
 image = { workspace = true }

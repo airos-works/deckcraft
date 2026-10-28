@@ -39,7 +39,7 @@ bash tools/haiku/package.sh --no-build
 ```
 
 Output: `target/x86_64-unknown-haiku/release/DeckCraft` and
-`artifacts/haiku/deckcraft-0.7.0~airos1-4-x86_64.hpkg`.
+`artifacts/haiku/deckcraft-0.12.0~airos1-1-x86_64.hpkg`.
 
 `tools/haiku/env.sh` sets defaults for this workspace. Override `RUSTUP_HOME`, `CARGO_HOME`,
 `HAIKU_SYSROOT`, `HAIKU_CROSS`, `CARGO_TARGET_DIR`, and `HAIKU_HOST_TOOLS` for other machines.
@@ -106,6 +106,11 @@ single toolchain exception above), asset/layer checks and WebAssembly checks als
 
 ## Revision history
 
+- 2026-10-29: merged upstream DeckCraft 0.12.0 (storytold/deckcraft f893f6af); package
+  `0.12.0~airos1-1`. The host follows egui 0.37 (screenshot callbacks, wheel source,
+  `TextSelectionSettled`, the context-taking `raw_input_hook`), installs the IME pass hooks,
+  and opens Tracker and command-line files through `open_from_system`, so a `.ppsx` opened
+  last starts its slide show. Upstream's self-update checks stay off: pkgman updates the package.
 - 2026-10-18: package revision 4 supplies the executable MIME type so files opened
   from Tracker launch directly into the editor. Test the actual Tracker launch;
   passing a filename on the command line or sending refs to an existing process

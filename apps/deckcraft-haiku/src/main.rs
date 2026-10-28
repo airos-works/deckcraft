@@ -161,6 +161,7 @@ OPTIONS:
     fn interface(args: Args, scale: f32) {
         let ctx = egui::Context::default();
         ctx.set_embed_viewports(true);
+        deckcraft_ui_egui::install_ime_pass_hooks(&ctx);
         let mut session = Session::new();
         if args.sample
             && let Err(e) = deckcraft_engine::sample::open_sample(&mut session)
@@ -186,14 +187,20 @@ OPTIONS:
         // Files named on the command line open as File › Open opens them; Tracker's arrive as
         // messages (`shell`). Never the program itself, which a launcher may name.
         let exe = std::env::current_exe().and_then(std::fs::canonicalize).ok();
-        for f in &args.files {
-            if exe.is_some() && std::fs::canonicalize(f).ok() == exe {
-                log::warn!("not opening {f}: it is DeckCraft itself");
-                continue;
-            }
-            if let Err(e) = app.open_path(f) {
-                log::warn!("{f}: {e}");
-            }
+        // A PowerPoint Show given last starts its slide show.
+        let files: Vec<String> = args
+            .files
+            .into_iter()
+            .filter(|f| {
+                let me = exe.is_some() && std::fs::canonicalize(f).ok() == exe;
+                if me {
+                    log::warn!("not opening {f}: it is DeckCraft itself");
+                }
+                !me
+            })
+            .collect();
+        for (f, e) in app.open_from_system(&files) {
+            log::warn!("{f}: {e}");
         }
         if args.show {
             app.start_show(0, false);

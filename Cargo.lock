@@ -1114,9 +1114,10 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-haiku"
-version = "0.7.0"
+version = "0.12.0"
 dependencies = [
  "cc",
+ "chrono",
  "deckcraft-engine",
  "deckcraft-media",
  "deckcraft-ui-egui",

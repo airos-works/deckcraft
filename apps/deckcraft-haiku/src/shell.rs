@@ -39,7 +39,7 @@ pub struct Shell {
     repaint_at: Option<Instant>,
     /// When other threads asked for one (`request_repaint` from a worker).
     woken_for: Arc<Mutex<Option<Instant>>>,
-    screenshots: Vec<egui::UserData>,
+    screenshots: Vec<egui::ScreenshotCallback>,
     title: String,
     /// Files saved (or about to be) that need their MIME type, until when to keep trying.
     to_type: Vec<(PathBuf, Instant)>,
@@ -233,6 +233,8 @@ impl Shell {
                     unit: egui::MouseWheelUnit::Line,
                     delta: vec2(-ev.dx, -ev.dy),
                     phase: egui::TouchPhase::Move,
+                    // B_MOUSE_WHEEL_CHANGED doesn't tell a wheel from a touchpad's scrolling.
+                    source: egui::MouseWheelSource::Unknown,
                     modifiers: self.modifiers,
                 });
             }
@@ -251,10 +253,10 @@ impl Shell {
             // window: they open as presentations, as File › Open opens them (the desktop app
             // opens dropped files the same way). Each replaces an untouched blank Book1.
             kind::OPEN_FILES | kind::DROPPED_FILES => {
-                for path in text.lines().filter(|l| !l.is_empty()) {
-                    if let Err(e) = self.app.open_path(path) {
-                        self.app.set_status(e);
-                    }
+                // A PowerPoint Show opened last starts its slide show, as on the desktop.
+                let paths: Vec<String> = text.lines().filter(|l| !l.is_empty()).map(str::to_owned).collect();
+                for (_, e) in self.app.open_from_system(&paths) {
+                    self.app.set_status(e);
                 }
                 host::window_command(WindowCommand::Activate);
             }
@@ -348,7 +350,7 @@ impl Shell {
             ..Default::default()
         };
         let mut raw = raw;
-        self.app.raw_input_hook(&mut raw);
+        self.app.raw_input_hook(&self.ctx, &mut raw);
         let ctx = self.ctx.clone();
         let t0 = Instant::now();
         let mut out = ctx.run_ui(raw, |ui| {
@@ -380,6 +382,8 @@ impl Shell {
                         log::warn!("couldn't open {}", u.url);
                     }
                 }
+                // Haiku has no PRIMARY selection to put it in.
+                egui::OutputCommand::TextSelectionSettled(_) => {}
             }
         }
         let mut delay = Duration::MAX;
@@ -427,9 +431,8 @@ impl Shell {
         self.raster.free_textures(&out.textures_delta);
         // Applied: epaint checks (in debug builds) that no texture update is dropped unhandled.
         out.textures_delta.clear();
-        for user_data in std::mem::take(&mut self.screenshots) {
-            let image = Arc::new(self.raster.image());
-            self.events.push(Event::Screenshot { viewport_id: ViewportId::ROOT, user_data, image });
+        for callback in std::mem::take(&mut self.screenshots) {
+            callback.complete(Arc::new(self.raster.image()));
             delay = Duration::ZERO;
         }
         if (ppp - self.ppp).abs() > f32::EPSILON {
