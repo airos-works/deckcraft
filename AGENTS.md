@@ -198,6 +198,6 @@ the `ROADMAP.md` progress log, and update each touched doc's status line and rev
 The air/OS port lives in `apps/deckcraft-haiku`; build it with `tools/haiku/build.sh`.
 The user's native Be API requirement is implemented using the proven GridCraft/WordCraft
 host. For this platform boundary only, C++ and unsafe Rust FFI are permitted in
-`native/host.cpp` and `src/host.rs`. Keep unsafe code confined there, document pointer
+`native/host.cpp` (and `native/media.cpp`, the Media Kit codecs) and `src/host.rs`. Keep unsafe code confined there, document pointer
 ownership and callback lifetimes, and deny it everywhere else. Do not replace the native
 host with eframe/winit/wgpu on Haiku. See `docs/haiku.md` for validation and known gaps.

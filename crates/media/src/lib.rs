@@ -7,6 +7,8 @@
 //! - [`video::VideoDecoder`]: H.264, HEVC, VP9 and AV1 in MP4/MOV and WebM/Matroska to RGBA
 //!   [`video::Frame`]s (our own decoders, ported from FilmCraft); [`video::poster_png`].
 //! - [`clip::ClipParams`]: trim, fade in/out and volume.
+//! - [`platform::Platform`]: codecs a host can add for what our own decoders don't read (the
+//!   air/OS host: the Media Kit), asked only after them.
 //! - [`player::Player`]: the playback mixer and clock the UI host drives, over an
 //!   [`player::AudioOut`] it injects (cpal on desktop; none on the web or in tests, where the clock
 //!   runs on wall time); [`feed::VideoFeed`] decodes video ahead of that clock.
@@ -20,6 +22,7 @@ pub mod audio;
 pub mod clip;
 pub mod feed;
 mod mp4guard;
+pub mod platform;
 pub mod player;
 pub mod probe;
 pub mod video;
@@ -30,9 +33,10 @@ use std::sync::Arc;
 pub use audio::Pcm;
 pub use clip::ClipParams;
 pub use feed::VideoFeed;
+pub use platform::{Platform, VideoSource};
 pub use player::{AudioOut, PlayState, Player, VoiceSpec, VoiceStatus};
 pub use probe::{AudioInfo, MediaInfo, VideoInfo, probe, probe_headers};
-pub use video::{Frame, VideoDecoder, poster_frame, poster_png};
+pub use video::{Frame, VideoDecoder, open_video, poster_frame, poster_png};
 
 /// Shared media bytes (the model's `MediaItem::data`).
 pub type Bytes = Arc<Vec<u8>>;

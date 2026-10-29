@@ -4,12 +4,15 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=native/host.cpp");
+    println!("cargo:rerun-if-changed=native/media.cpp");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("haiku") {
         return;
     }
     cc::Build::new()
         .cpp(true)
         .file("native/host.cpp")
+        // The Media Kit's codecs for movies DeckCraft doesn't decode itself (src/media_kit.rs).
+        .file("native/media.cpp")
         .flag("-Wno-multichar")
         .flag("-Wno-unused-parameter")
         .opt_level(2)

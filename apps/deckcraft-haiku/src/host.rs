@@ -530,3 +530,129 @@ impl Drop for AudioOut {
         deckcraft_media::AudioOut::stop(self);
     }
 }
+
+// The Media Kit's codecs (`native/media.cpp`), for `media_kit`. The media's bytes are Rust's: a
+// decoder keeps its own reference to them and closes its native handle before letting them go.
+
+/// What the Media Kit says about media bytes. Keep in step with `DcMediaInfo` in `media.cpp`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MediaKitInfo {
+    container: [c_char; 32],
+    pub duration_us: i64,
+    pub has_video: i32,
+    pub video_decodable: i32,
+    pub width: i32,
+    pub height: i32,
+    pub fps: f32,
+    pub frames: i64,
+    video_codec: [c_char; 96],
+    pub has_audio: i32,
+    pub audio_decodable: i32,
+    pub channels: i32,
+    pub rate: f32,
+    audio_codec: [c_char; 96],
+}
+
+impl MediaKitInfo {
+    fn text(s: &[c_char]) -> String {
+        let bytes: Vec<u8> = s.iter().take_while(|&&b| b != 0).map(|&b| b as u8).collect();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+    /// The reader's name for the container ("avi", "asf", "mpeg", "ogg"…).
+    pub fn container(&self) -> String {
+        Self::text(&self.container)
+    }
+    pub fn video_codec(&self) -> String {
+        Self::text(&self.video_codec)
+    }
+    pub fn audio_codec(&self) -> String {
+        Self::text(&self.audio_codec)
+    }
+}
+
+unsafe extern "C" {
+    fn dc_media_probe(data: *const c_void, len: usize, info: *mut MediaKitInfo) -> i32;
+    fn dc_video_open(data: *const c_void, len: usize, width: *mut i32, height: *mut i32, container: *mut c_char) -> *mut c_void;
+    fn dc_video_next(video: *mut c_void, rgba: *mut u8, len: usize, time_us: *mut i64) -> i32;
+    fn dc_video_seek(video: *mut c_void, time_us: i64) -> i64;
+    fn dc_video_close(video: *mut c_void);
+    fn dc_audio_decode(data: *const c_void, len: usize, max_samples: usize, channels: *mut i32, rate: *mut f32, count: *mut usize) -> *mut f32;
+}
+
+/// The Media Kit's description of `data`, when one of its readers takes it.
+pub fn media_probe(data: &[u8]) -> Option<MediaKitInfo> {
+    // SAFETY: all-zero is a valid MediaKitInfo (integers and empty strings).
+    let mut info: MediaKitInfo = unsafe { std::mem::zeroed() };
+    // SAFETY: `data` is live for the call; the host fills `info` and keeps no pointer.
+    (unsafe { dc_media_probe(data.as_ptr().cast(), data.len(), &mut info) } == 0).then_some(info)
+}
+
+/// The first audio track of `data` decoded by the Media Kit: channels, sample rate and
+/// interleaved samples (at most `max_samples`).
+pub fn media_audio(data: &[u8], max_samples: usize) -> Option<(u16, u32, Vec<f32>)> {
+    let (mut channels, mut rate, mut count) = (0i32, 0f32, 0usize);
+    // SAFETY: `data` is live for the call; the samples come back malloc'd, `count` of them.
+    let p = unsafe { dc_audio_decode(data.as_ptr().cast(), data.len(), max_samples, &mut channels, &mut rate, &mut count) };
+    if p.is_null() {
+        return None;
+    }
+    // SAFETY: the host allocated `count` floats at `p`.
+    let samples = unsafe { std::slice::from_raw_parts(p, count) }.to_vec();
+    // SAFETY: allocated by the host's malloc.
+    unsafe { dc_free(p.cast()) };
+    let rate = rate.round();
+    ((1.0..=768_000.0).contains(&rate) && channels > 0).then(|| (u16::try_from(channels).unwrap_or(1), rate as u32, samples))
+}
+
+/// A video track the Media Kit decodes, frame by frame.
+pub struct MediaKitVideo {
+    handle: std::ptr::NonNull<c_void>,
+    /// The bytes the native reader reads; dropped only after the handle is closed.
+    _bytes: std::sync::Arc<Vec<u8>>,
+    pub width: u32,
+    pub height: u32,
+    /// The reader's name for the container, as [`MediaKitInfo::container`].
+    pub container: String,
+}
+
+// SAFETY: the native decoder has no thread affinity; `&mut self` keeps it to one thread at a time.
+unsafe impl Send for MediaKitVideo {}
+
+impl MediaKitVideo {
+    pub fn open(bytes: std::sync::Arc<Vec<u8>>) -> Option<Self> {
+        let (mut w, mut h, mut container) = (0i32, 0i32, [0 as c_char; 32]);
+        // SAFETY: the bytes stay alive (in `_bytes`) until the handle is closed in `drop`; the
+        // host writes at most 32 bytes of container name.
+        let p = unsafe { dc_video_open(bytes.as_ptr().cast(), bytes.len(), &mut w, &mut h, container.as_mut_ptr()) };
+        let handle = std::ptr::NonNull::new(p)?;
+        let container = MediaKitInfo::text(&container);
+        Some(Self { handle, _bytes: bytes, width: u32::try_from(w).unwrap_or(0), height: u32::try_from(h).unwrap_or(0), container })
+    }
+
+    /// Decodes the next frame into `rgba` (resized to width × height × 4): its time in
+    /// microseconds, `Ok(None)` at the end.
+    pub fn next(&mut self, rgba: &mut Vec<u8>) -> Result<Option<i64>, ()> {
+        rgba.resize(self.width as usize * self.height as usize * 4, 0);
+        let mut time = 0i64;
+        // SAFETY: our live handle and a writable buffer of the length passed.
+        match unsafe { dc_video_next(self.handle.as_ptr(), rgba.as_mut_ptr(), rgba.len(), &mut time) } {
+            1 => Ok(Some(time)),
+            0 => Ok(None),
+            _ => Err(()),
+        }
+    }
+
+    /// Moves to the key frame at or before `time_us`; the time decoding resumes at.
+    pub fn seek(&mut self, time_us: i64) -> i64 {
+        // SAFETY: our live handle.
+        unsafe { dc_video_seek(self.handle.as_ptr(), time_us) }
+    }
+}
+
+impl Drop for MediaKitVideo {
+    fn drop(&mut self) {
+        // SAFETY: our live handle, closed exactly once, before `_bytes` is dropped.
+        unsafe { dc_video_close(self.handle.as_ptr()) };
+    }
+}

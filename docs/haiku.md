@@ -15,6 +15,7 @@ and WordCraft's recovery owner-lock fix. No sibling repository is needed to buil
 | Cursors / locale / document types | `BCursor`, `BLocaleRoster`, `BMimeType` |
 | Slide show | Native borderless fullscreen on the current display; restores the editor's frame |
 | Audio | `BSoundPlayer` (Media Kit), stereo float PCM; DeckCraft's existing decoder and mixer |
+| Movies | DeckCraft's own decoders (H.264, HEVC, VP9, AV1); others through the Media Kit (`BMediaFile`, Movies) |
 | Recovery | Haiku `flock` through rustix; other running instances keep their snapshots |
 
 The full ribbon, slide canvas, thumbnails, notes, editing commands, PPTX and `.deckcraft`
@@ -22,7 +23,9 @@ formats, PDF/image export, transitions and animations are the upstream Rust impl
 The platform host replaces eframe/winit and cpal, and draws with wgpu itself (Rendering). The
 only unsafe Rust is the reviewed native boundary in `apps/deckcraft-haiku/src/host.rs` and the
 raw Vulkan frame buffer import in `src/scanout.rs`; the rest denies unsafe code. C++ is
-limited to the Be API boundary, following the existing sibling ports.
+limited to the Be API boundary (`native/host.cpp`, and `native/media.cpp` for the Media Kit's
+codecs), following the existing sibling ports. The shared crates' only air/OS hook is
+`deckcraft_media::platform`, safe Rust that any host could use.
 
 Settings and logs live under `~/config/settings/DeckCraft`, recovery under `Recovery/`.
 Fonts are discovered in the system and user `data/fonts` folders. The interface prefers
@@ -114,6 +117,32 @@ The final Linux run passed all seven `cargo xtask ci` gates, with 1,696 tests pa
 0 failures and 6 ignored tests. The native cross-build, native Clippy check (with the
 single toolchain exception above), asset/layer checks and WebAssembly checks also passed.
 
+## Movies
+
+Movies embedded in slides play in the editor and the slide show with the movie's control bar
+(play/pause, seek, loop, trim, fades), as on the other platforms: upstream's `VideoFeed` decodes
+ahead of the playback clock on a worker thread and the frame due at the clock's time becomes the
+shape's egui texture. The clock is the audio callback's (`BSoundPlayer`), so picture and sound
+stay together. H.264, HEVC, VP9 and AV1 in MP4/MOV/WebM/Matroska use DeckCraft's own decoders.
+
+Everything else goes through the Media Kit (`apps/deckcraft-haiku/native/media.cpp`,
+`src/media_kit.rs`), registered with `deckcraft_media::platform` when the app starts: probing,
+audio decoding and video decoding ask it only for what DeckCraft's decoders can't read.
+`BMediaFile` reads the media's bytes from memory (`BMemoryIO`), `BMediaTrack` decodes video to
+`B_RGB32` frames (converted to RGBA) and audio to float samples. Checked on the x399 (hrev60207,
+ffmpeg 6 plugin, libavcodec 60.31): Motion JPEG (MOV), MPEG-2 (`.mpg`), MPEG-4 Part 2 (AVI,
+MP4), MS-MPEG-4 v3 and WMV 8 with WMA 2 (`.wmv`), Theora with Vorbis (`.ogv`), and VP8 (WebM),
+plus MP3, MP2, PCM and WMA audio in them. The ffmpeg plugin offers every decoder its libavcodec
+has (WMV 1-3/VC-1, ProRes, DNxHD, Cinepak, Indeo, RealVideo, Sorenson, FLV, DV…).
+`DECKCRAFT_NO_MEDIA_KIT=1` turns it off.
+
+Media Kit seeking lands on the key frame before the time; the frames up to the time are decoded
+and dropped, as DeckCraft's decoder does. Its Ogg and MPEG program stream readers only estimate
+where a time is (Theora lands on a frame that isn't a key frame and shows the old picture with
+new changes on it; MPEG lands after the time), so a seek there decodes from the start instead.
+The ffmpeg WebM reader's frame count is wrong (hundreds of millions); the probe uses the duration
+times the frame rate instead.
+
 ## Initial limitations
 
 - Slides are still rendered by the engine on the CPU; only the interface is drawn with Vulkan.
@@ -127,6 +156,9 @@ single toolchain exception above), asset/layer checks and WebAssembly checks als
 
 ## Revision history
 
+- 2026-10-29: movies (#7). DeckCraft's own H.264/HEVC/VP9/AV1 decoders already played movies on
+  air/OS; the formats they don't read (Motion JPEG, MPEG-1/2, MPEG-4 Part 2, WMV, Theora, VP8,
+  and WMA, MP2 and MP3-in-AVI audio) now play through the Media Kit (Movies).
 - 2026-10-29: package `0.12.0~airos1-2` draws the window with Vulkan (Rendering). Framework 13
   (Radeon 760M, 175 %, the sample deck, 30 samples each, against the rasteriser in the same
   build): DeckCraft CPU 1.78 s -> 0.62 s, app_server 0.12 -> 0.11 s; hover 6.1 -> 5.2 ms and

@@ -4,7 +4,8 @@
 
 use std::sync::Arc;
 
-use crate::video::{Frame, VideoDecoder};
+use crate::VideoSource;
+use crate::video::Frame;
 use crate::{Bytes, Result};
 
 /// Frames decoded ahead of the clock.
@@ -30,12 +31,12 @@ pub struct VideoFeed {
     #[cfg(not(target_arch = "wasm32"))]
     rx: std::sync::mpsc::Receiver<(u64, Option<Frame>)>,
     #[cfg(target_arch = "wasm32")]
-    dec: VideoDecoder,
+    dec: Box<dyn VideoSource>,
 }
 
 impl VideoFeed {
     pub fn new(bytes: Bytes) -> Result<VideoFeed> {
-        let dec = VideoDecoder::open(bytes)?;
+        let dec = crate::video::open_video(bytes)?;
         let size = dec.size();
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -139,7 +140,7 @@ impl VideoFeed {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn worker(mut dec: VideoDecoder, cmds: std::sync::mpsc::Receiver<Cmd>, frames: std::sync::mpsc::SyncSender<(u64, Option<Frame>)>) {
+fn worker(mut dec: Box<dyn VideoSource>, cmds: std::sync::mpsc::Receiver<Cmd>, frames: std::sync::mpsc::SyncSender<(u64, Option<Frame>)>) {
     let mut generation = 0u64;
     let mut at_end = false;
     loop {

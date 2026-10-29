@@ -59,8 +59,13 @@ pub fn probe(bytes: &Bytes) -> Result<MediaInfo> {
 }
 
 /// [`probe`] from the headers alone, without decoding: a raw MP3 or ADTS stream without an
-/// index reports a `duration_ms` of 0.
+/// index reports a `duration_ms` of 0. Streams our decoders don't read are described by the
+/// host's codecs where it registered some ([`crate::platform`]).
 pub fn probe_headers(bytes: &Bytes) -> Result<MediaInfo> {
+    crate::platform::complete_probe(bytes, probe_own(bytes))
+}
+
+fn probe_own(bytes: &Bytes) -> Result<MediaInfo> {
     let c = Container::sniff(bytes);
     let mut info = match c {
         Container::Mp4 => probe_mp4(bytes)?,

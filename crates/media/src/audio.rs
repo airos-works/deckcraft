@@ -69,8 +69,13 @@ impl AsRef<[u8]> for Shared {
     }
 }
 
-/// Decode the audio of `bytes` (an audio file, or the audio track of a video) to PCM.
+/// Decode the audio of `bytes` (an audio file, or the audio track of a video) to PCM: with our
+/// decoders, else the host's ([`crate::platform`]).
 pub fn decode(bytes: &Bytes) -> Result<Pcm> {
+    decode_own(bytes).or_else(|e| crate::platform::get().and_then(|p| p.decode_audio(bytes)).unwrap_or(Err(e)))
+}
+
+fn decode_own(bytes: &Bytes) -> Result<Pcm> {
     match Container::sniff(bytes) {
         Container::Asf => Err(MediaError::Unsupported("Windows Media Audio (WMA)".into())),
         Container::Ogg => match decode_ogg_opus(bytes) {

@@ -462,9 +462,30 @@ impl VideoDecoder {
     }
 }
 
+impl crate::VideoSource for VideoDecoder {
+    fn size(&self) -> (u32, u32) {
+        VideoDecoder::size(self)
+    }
+    fn next_frame(&mut self) -> Result<Option<Frame>> {
+        VideoDecoder::next_frame(self)
+    }
+    fn seek(&mut self, t: f64) {
+        VideoDecoder::seek(self, t);
+    }
+}
+
+/// The video track's decoder: ours, else the host's ([`crate::platform`]) for a codec or
+/// container we don't read.
+pub fn open_video(bytes: Bytes) -> Result<Box<dyn crate::VideoSource>> {
+    match VideoDecoder::open(bytes.clone()) {
+        Ok(d) => Ok(Box::new(d)),
+        Err(e) => crate::platform::get().and_then(|p| p.open_video(&bytes)).unwrap_or(Err(e)),
+    }
+}
+
 /// The frame shown at `t` seconds (the first frame when `t` is 0).
 pub fn poster_frame(bytes: &Bytes, t: f64) -> Result<Frame> {
-    let mut d = VideoDecoder::open(bytes.clone())?;
+    let mut d = open_video(bytes.clone())?;
     if t > 0.0 {
         d.seek(t);
     }

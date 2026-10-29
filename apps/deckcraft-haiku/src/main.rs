@@ -28,6 +28,8 @@ mod host;
 #[path = "../../deckcraft/src/logging.rs"]
 mod logging;
 #[cfg(target_os = "haiku")]
+mod media_kit;
+#[cfg(target_os = "haiku")]
 mod present;
 #[cfg(target_os = "haiku")]
 mod scanout;
@@ -58,7 +60,7 @@ mod haiku {
     use deckcraft_engine::Session;
     use deckcraft_ui_egui::SlideApp;
 
-    use crate::{control_server, host, logging, services, shell};
+    use crate::{control_server, host, logging, media_kit, services, shell};
 
     const USAGE: &str = "\
 DeckCraft — the DeckCraft presentation editor for air/OS
@@ -260,6 +262,9 @@ OPTIONS:
         if prefs_enabled() {
             services::claim_document_types();
         }
+        // Movies and sounds in formats DeckCraft's own decoders don't read play through the
+        // system's codecs.
+        media_kit::install();
         // The rasteriser's workers: up to 8 (more cost more in waking than they save on a
         // frame), named for the system's process lists.
         let workers = std::thread::available_parallelism().map_or(4, |n| n.get().clamp(1, 8));
