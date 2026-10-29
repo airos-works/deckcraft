@@ -8,12 +8,12 @@ and WordCraft's recovery owner-lock fix. No sibling repository is needed to buil
 
 | Service | air/OS implementation |
 | --- | --- |
-| Window and event loop | `BApplication`, `BWindow`, `BView` |
+| Window and event loop | `BApplication`, a `BWindow` and `BView` per egui viewport (editor, New Window, presenter view) |
 | Drawing | Vulkan (egui-wgpu) on a hardware GPU, changed tiles shown in a `BBitmap`; else egui triangles rasterized on the CPU with dirty bands; HiDPI support |
 | Open / Save / insert media | `BFilePanel` |
 | Clipboard | `BClipboard`: text, HTML, and pictures as PNG and archived `BBitmap`s (ShowImage, Screenshot, WonderBrush, airShot) both ways |
 | Cursors / locale / document types | `BCursor`, `BLocaleRoster`, `BMimeType` |
-| Slide show | Native borderless fullscreen on the current display; restores the editor's frame |
+| Slide show | Native borderless full screen; with several monitors on one apart from the presenter view's window; restores the editor's frame |
 | Audio | `BSoundPlayer` (Media Kit), stereo float PCM; DeckCraft's existing decoder and mixer |
 | Movies | DeckCraft's own decoders (H.264, HEVC, VP9, AV1); others through the Media Kit (`BMediaFile`, Movies) |
 | Window | Opens where it was last closed (`window.json`), fitted onto the monitors there are now |
@@ -145,6 +145,45 @@ new changes on it; MPEG lands after the time), so a seek there decodes from the 
 The ffmpeg WebM reader's frame count is wrong (hundreds of millions); the probe uses the duration
 times the frame rate instead.
 
+## Windows, the slide show and the presenter view
+
+Every egui viewport gets a native window of its own, as eframe gives them on the other desktops
+(WordCraft's design, `apps/deckcraft-haiku/src/viewports.rs`, platform-neutral and tested on any
+host with a fake platform in `viewports/tests.rs`; `src/platform.rs` is its air/OS side). The
+root viewport is the editor's window, which also becomes the slide show; View › New Window
+(`deckcraft_doc_window`) and the slide show's presenter view (`deckcraft_presenter`) are
+immediate viewports in windows of their own. `host.cpp` keeps its windows in a map by id and
+tags every event with its window; each window has its own Vulkan presenter (one device and egui
+renderer) or rasteriser canvas (one texture store), its own direct connection, cursor, full
+screen state and input method transaction. Input goes to the window it happened in: a key or a
+click in the presenter view drives the show as upstream's presenter window does. A window's
+close button closes that window (the presenter view's ends it for the rest of the show, as
+upstream); the editor's quits after asking about unsaved presentations, as before. Files dropped
+on any window go to the editor's inbox. The editor answers its own IME resets
+(`IMEOutput::reset_request`) per window: the host stops the input method and reports
+`Event::ImeResetCompleted` after the input queued before it.
+
+The presenter view is on by default again, as upstream (Slide Show › Presenter View, saved in
+`ui.json`). The monitors come from air/OS's display layout (`BPrivate::get_display_layout`:
+the enabled, connected monitors that don't mirror another; `dc_host_monitors`), and a window's
+monitor from `get_display_frame`:
+
+- A window opened without a position (the presenter view, a New Window) is centred on the
+  active window's monitor: the editor's, where the show was started.
+- A window going full screen while another of DeckCraft's windows is on its monitor fills a
+  monitor none of them is on. So the slide show goes to the other monitor and the presenter view
+  stays by the editor, as PowerPoint puts them. Without the presenter view the show fills the
+  editor's monitor, as before. Leaving the show puts the editor back where it was.
+- With one monitor (what upstream's desktop app does: the presenter window is a window of its
+  own, in front of the full-screen show) the show fills the monitor above other programs'
+  windows (`B_FLOATING_ALL_WINDOW_FEEL`, as before) and the presenter view floats in front of
+  it until the show ends; closing it leaves the show alone on the screen.
+- A window opened without a position while the root is full screen goes on another monitor.
+
+`DECKCRAFT_MONITORS="left,top,right,bottom;..."` (logical pixels) replaces the monitor list
+and each window's monitor, so the placement can be tried on one screen split in two:
+`DECKCRAFT_MONITORS="0,0,959,1079;960,0,1919,1079"` on a 1920 × 1080 desktop.
+
 ## Updates
 
 DeckCraft is installed and updated as a package (pkgman, SoftwareUpdater). Upstream's release
@@ -219,14 +258,14 @@ nor writes it.
 ## Initial limitations
 
 - Slides are still rendered by the engine on the CPU; only the interface is drawn with Vulkan.
-- Presenter view is embedded in the main window; a separate second-monitor presenter window
-  is not implemented yet. Presenter view starts disabled to keep audience slides unobstructed.
 - Native direct printing is not implemented; export a PDF to print through a PDF viewer.
 - The host does not expose native accessibility nodes.
 - This is the upstream alpha editor: its remaining format and editing limitations still apply.
 
 ## Revision history
 
+- 2026-10-30: every egui viewport in a `BWindow` of its own, the presenter view on a second
+  monitor and on by default (#6; Windows, the slide show and the presenter view).
 - 2026-10-29: one running copy; Tracker's opens and later launches go to it, `--show` and a
   PowerPoint Show starting the slide show there (#2; Clipboard and opening files).
 - 2026-10-29: input methods compose in the slide's text (#5; Touchpad scrolling and input

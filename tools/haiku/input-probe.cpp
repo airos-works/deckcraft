@@ -16,6 +16,11 @@
  *   input-probe TEAM touchpad DY [N] an air/OS touchpad scroll gesture of DY
  *                                    wheel steps in N messages (default 20)
  *   input-probe TEAM wheel DY        a mouse wheel turned DY steps
+ *   input-probe TEAM key N CHAR [command]
+ *                                    the key typing CHAR pressed and released
+ *                                    in window N (with Command: Command+C)
+ *   input-probe TEAM click N X Y     a primary click at (X, Y) in window N's
+ *                                    canvas
  *   input-probe clipboard            the clipboard's types and sizes, and
  *                                    the text of its MathML types
  *   input-probe open APP FILE...     opens the files with the application
@@ -25,7 +30,9 @@
  *
  * TEAM is the running copy's team id (several copies of an application can
  * run from different files). Messages go to its canvas view by scripting
- * (View "canvas" of Window 0), as the input server's would reach it.
+ * (View "canvas" of Window 0), as the input server's would reach it; keys and
+ * clicks go to window N's or its canvas's own messenger (a view ignores mouse
+ * and key messages that still carry specifiers).
  *
  * Build on air/OS: g++ -o input-probe input-probe.cpp -lbe
  */
@@ -200,6 +207,62 @@ Touchpad(float steps, int32 count)
 }
 
 
+// The messenger of window `window`'s canvas view (or the window itself).
+static BMessenger
+HandlerOf(int32 window, bool view = true)
+{
+	BMessage request(B_GET_PROPERTY);
+	request.AddSpecifier("Messenger");
+	if (view)
+		request.AddSpecifier("View", "canvas");
+	request.AddSpecifier("Window", window);
+	BMessage reply;
+	BMessenger handler;
+	if (sTarget.SendMessage(&request, &reply, 1000000, 1000000) != B_OK
+		|| reply.FindMessenger("result", &handler) != B_OK)
+		fprintf(stderr, "no window %ld\n", (long)window);
+	return handler;
+}
+
+
+static void
+Key(int32 window, char c, bool command)
+{
+	BMessenger target = HandlerOf(window);
+	uint32 mods = command ? B_COMMAND_KEY | B_LEFT_COMMAND_KEY : 0;
+	for (int i = 0; i < 2; i++) {
+		BMessage key(i == 0 ? B_KEY_DOWN : B_KEY_UP);
+		key.AddInt64("when", system_time());
+		key.AddInt32("modifiers", mods);
+		key.AddInt32("key", 0);
+		key.AddInt32("raw_char", c);
+		key.AddInt8("byte", c);
+		char bytes[2] = { c, 0 };
+		key.AddString("bytes", bytes);
+		target.SendMessage(&key);
+		snooze(30000);
+	}
+}
+
+
+static void
+Click(int32 window, float x, float y)
+{
+	BMessenger target = HandlerOf(window);
+	for (int i = 0; i < 2; i++) {
+		BMessage mouse(i == 0 ? B_MOUSE_DOWN : B_MOUSE_UP);
+		mouse.AddInt64("when", system_time());
+		mouse.AddPoint("be:view_where", BPoint(x, y));
+		mouse.AddPoint("where", BPoint(x, y));
+		mouse.AddInt32("buttons", i == 0 ? B_PRIMARY_MOUSE_BUTTON : 0);
+		mouse.AddInt32("clicks", 1);
+		mouse.AddInt32("modifiers", 0);
+		target.SendMessage(&mouse);
+		snooze(50000);
+	}
+}
+
+
 static void
 Clipboard()
 {
@@ -276,6 +339,10 @@ main(int argc, char** argv)
 		Point(atof(argv[3]), atof(argv[4]));
 	else if (strcmp(what, "touchpad") == 0 && argc > 3)
 		Touchpad(atof(argv[3]), argc > 4 ? atoi(argv[4]) : 20);
+	else if (strcmp(what, "key") == 0 && argc > 4)
+		Key(atol(argv[3]), argv[4][0], argc > 5 && strcmp(argv[5], "command") == 0);
+	else if (strcmp(what, "click") == 0 && argc > 5)
+		Click(atol(argv[3]), atof(argv[4]), atof(argv[5]));
 	else if (strcmp(what, "wheel") == 0 && argc > 3)
 		Wheel(atof(argv[3]), B_MOUSE_POINTING_DEVICE, 0, false);
 	else {

@@ -1,11 +1,11 @@
 //! DeckCraft for air/OS (and Haiku).
 //!
 //! The same interface as the desktop app (`deckcraft-ui-egui`), hosted natively: a
-//! `BApplication` and `BWindow` from the Be API (`native/host.cpp`) take the input and show the
-//! frames, which egui's output becomes with Vulkan (`gpu`, shown by `present`) or, without a
-//! hardware Vulkan adapter, through a software rasteriser (`raster`), with the system's file
-//! panels, clipboard, cursors, file types and locale. eframe and winit don't run on Haiku;
-//! nothing below the interface changes.
+//! `BApplication` and a `BWindow` per egui viewport from the Be API (`native/host.cpp`,
+//! `viewports`, `platform`) take the input and show the frames, which egui's output becomes with
+//! Vulkan (`gpu`, shown by `present`) or, without a hardware Vulkan adapter, through a software
+//! rasteriser (`raster`), with the system's file panels, clipboard, cursors, file types and
+//! locale. eframe and winit don't run on Haiku; nothing below the interface changes.
 //!
 //! Usage: `DeckCraft [--sample] [--show] [--control PORT] [FILE…]`, as the desktop app.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -15,6 +15,7 @@
 mod damage;
 mod keys;
 mod raster;
+mod viewports;
 
 #[cfg(target_os = "haiku")]
 mod gpu;
@@ -29,6 +30,8 @@ mod host;
 mod logging;
 #[cfg(target_os = "haiku")]
 mod media_kit;
+#[cfg(target_os = "haiku")]
+mod platform;
 #[cfg(target_os = "haiku")]
 mod present;
 #[cfg(target_os = "haiku")]
@@ -201,10 +204,10 @@ OPTIONS:
         a
     }
 
-    /// The interface thread: builds the app and runs the window's event loop.
-    fn interface(args: Args, scale: f32) {
+    /// The interface thread: builds the app and runs the windows' event loop. `root` is the
+    /// first window, the root viewport's.
+    fn interface(args: Args, root: i32, scale: f32) {
         let ctx = egui::Context::default();
-        ctx.set_embed_viewports(true);
         deckcraft_ui_egui::install_ime_pass_hooks(&ctx);
         let mut session = Session::new();
         if args.sample
@@ -214,9 +217,6 @@ OPTIONS:
         }
         let dialogs = Rc::new(services::Dialogs::default());
         let mut app = SlideApp::new(session, services::services(dialogs.clone()));
-        // A single native audience window: presenter controls remain available as an embedded
-        // panel when requested, but must not cover the audience's slides by default.
-        app.ui.presenter_view = false;
         load_prefs(&mut app);
         app.integrated_titlebar = false;
         if std::env::var_os("DECKCRAFT_NO_RECOVERY").is_none() {
@@ -251,7 +251,7 @@ OPTIONS:
             }
             app.start_show(0, false);
         }
-        let mut shell = match shell::Shell::new(app, ctx, dialogs, scale) {
+        let mut shell = match shell::Shell::new(app, ctx, dialogs, root, scale) {
             Ok(shell) => shell,
             Err(e) => {
                 log::error!("{e}");
@@ -321,15 +321,27 @@ OPTIONS:
         // Where it was last time, fitted onto the monitors there are now; else centred.
         let saved = saved_window();
         let min_size = MIN_SIZE.map(px);
-        host::open_window(&host::WindowSpec {
+        // The first window opens before the interface starts, so it shows at once.
+        let root = host::open_window(&host::WindowSpec {
             title: "DeckCraft".into(),
             position: saved.map(|(at, _)| at),
             size: saved.map_or(DEFAULT_SIZE.map(px), |(_, [w, h])| [w.max(min_size[0]), h.max(min_size[1])]),
-            min_size,
+            min_size: Some(min_size),
+            max_size: None,
+            decorations: true,
+            resizable: true,
+            visible: true,
             zoomed: false,
+            fullscreen: false,
+            floating: false,
+            buttons: [true; 3],
         });
+        let Some(root) = root else {
+            log::error!("couldn't open the window");
+            std::process::exit(1);
+        };
         let ui = std::thread::Builder::new().name("DeckCraft interface".into()).stack_size(16 << 20).spawn(move || {
-            let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| interface(args, scale)));
+            let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| interface(args, root, scale)));
             if ran.is_err() {
                 log::error!("the interface stopped after an internal error");
                 host::alert("DeckCraft", "DeckCraft ran into an internal error and has to close. The log is in ~/config/settings/DeckCraft/logs.");
