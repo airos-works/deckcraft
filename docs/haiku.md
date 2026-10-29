@@ -9,7 +9,7 @@ and WordCraft's recovery owner-lock fix. No sibling repository is needed to buil
 | Service | air/OS implementation |
 | --- | --- |
 | Window and event loop | `BApplication`, `BWindow`, `BView` |
-| Drawing | egui triangles rasterized on the CPU, displayed in a `BBitmap`; dirty bands and HiDPI support |
+| Drawing | Vulkan (egui-wgpu) on a hardware GPU, changed tiles shown in a `BBitmap`; else egui triangles rasterized on the CPU with dirty bands; HiDPI support |
 | Open / Save / insert media | `BFilePanel` |
 | Clipboard | `BClipboard`, text, HTML and PNG |
 | Cursors / locale / document types | `BCursor`, `BLocaleRoster`, `BMimeType` |
@@ -19,8 +19,9 @@ and WordCraft's recovery owner-lock fix. No sibling repository is needed to buil
 
 The full ribbon, slide canvas, thumbnails, notes, editing commands, PPTX and `.deckcraft`
 formats, PDF/image export, transitions and animations are the upstream Rust implementation.
-The platform host replaces eframe/winit/wgpu and cpal. The only unsafe Rust is the reviewed
-native boundary in `apps/deckcraft-haiku/src/host.rs`; the rest denies unsafe code. C++ is
+The platform host replaces eframe/winit and cpal, and draws with wgpu itself (Rendering). The
+only unsafe Rust is the reviewed native boundary in `apps/deckcraft-haiku/src/host.rs` and the
+raw Vulkan frame buffer import in `src/scanout.rs`; the rest denies unsafe code. C++ is
 limited to the Be API boundary, following the existing sibling ports.
 
 Settings and logs live under `~/config/settings/DeckCraft`, recovery under `Recovery/`.
@@ -28,6 +29,26 @@ Fonts are discovered in the system and user `data/fonts` folders. The interface 
 installed Noto Sans; no fonts are bundled. Control and Command (left Alt by default) both
 map to Ctrl-style editing shortcuts. Option maps to Alt. The native window's close button
 honors the editor's Save Changes prompt.
+
+## Rendering
+
+The window is drawn with Vulkan when the machine has a hardware adapter, as PhotoCraft's and
+LightCraft's air/OS hosts do (`apps/deckcraft-haiku/src/gpu.rs`): egui's triangles are drawn by
+egui-wgpu into a BGRA texture, and the presenter (`src/present.rs`, `damage.rs`, `scanout.rs`,
+shared with PhotoCraft) compares it with what app_server shows, 64 px tile by tile, and copies
+back only the tiles that changed. A frame drawn from exactly the same triangles, size and
+textures as the one on the screen is not drawn again (egui repaints more often than its output
+changes), so an idle or hovering window costs almost nothing. The software rasteriser
+(`src/raster.rs`, dirty bands) remains for machines without a hardware Vulkan adapter, and takes
+over without losing the open documents if the device is lost or reports an error.
+
+`DECKCRAFT_RENDERER=auto|vulkan|cpu` picks the renderer (auto: Vulkan on a discrete or integrated
+GPU, else the rasteriser; vulkan: fail at start without one). `DECKCRAFT_PRESENT=readback|full|direct`
+picks how frames reach the window (`readback`, the default; `full`, the whole frame every time;
+`direct`, experimental, straight into the screen's frame buffer through air/OS's
+`VkImportScanoutMemoryHAIKU`; not the default because RADV on the Framework 13 loses the device a
+few seconds after the import). wgpu's Vulkan backend is enabled for Haiku by the vendored
+`wgpu`, `wgpu-core` and `wgpu-core-deps-windows-linux-android` 30.0.1 (`vendor/README.md`).
 
 ## Build
 
@@ -95,7 +116,7 @@ single toolchain exception above), asset/layer checks and WebAssembly checks als
 
 ## Initial limitations
 
-- CPU rendering; large HiDPI windows and complex animated slides can be expensive.
+- Slides are still rendered by the engine on the CPU; only the interface is drawn with Vulkan.
 - Presenter view is embedded in the main window; a separate second-monitor presenter window
   is not implemented yet. Presenter view starts disabled to keep audience slides unobstructed.
 - Native IME composition is not forwarded yet; ordinary keyboard input and pasted Unicode work.
@@ -106,6 +127,10 @@ single toolchain exception above), asset/layer checks and WebAssembly checks als
 
 ## Revision history
 
+- 2026-10-29: package `0.12.0~airos1-2` draws the window with Vulkan (Rendering). Framework 13
+  (Radeon 760M, 175 %, the sample deck, 30 samples each, against the rasteriser in the same
+  build): DeckCraft CPU 1.78 s -> 0.62 s, app_server 0.12 -> 0.11 s; hover 6.1 -> 5.2 ms and
+  slide change 19.9 -> 17.2 ms per request.
 - 2026-10-29: merged upstream DeckCraft 0.12.0 (storytold/deckcraft f893f6af); package
   `0.12.0~airos1-1`. The host follows egui 0.37 (screenshot callbacks, wheel source,
   `TextSelectionSettled`, the context-taking `raw_input_hook`), installs the IME pass hooks,

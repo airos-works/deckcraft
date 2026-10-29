@@ -2,17 +2,22 @@
 //!
 //! The same interface as the desktop app (`deckcraft-ui-egui`), hosted natively: a
 //! `BApplication` and `BWindow` from the Be API (`native/host.cpp`) take the input and show the
-//! frames, which egui's output becomes through a software rasteriser (`raster`), with the
-//! system's file panels, clipboard, cursors, file types and locale. eframe, winit and wgpu don't
-//! run on Haiku; nothing below the interface changes.
+//! frames, which egui's output becomes with Vulkan (`gpu`, shown by `present`) or, without a
+//! hardware Vulkan adapter, through a software rasteriser (`raster`), with the system's file
+//! panels, clipboard, cursors, file types and locale. eframe and winit don't run on Haiku;
+//! nothing below the interface changes.
 //!
 //! Usage: `DeckCraft [--sample] [--show] [--control PORT] [FILE…]`, as the desktop app.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 // Elsewhere only the platform-neutral parts build (and are tested).
 #![cfg_attr(not(target_os = "haiku"), allow(dead_code))]
 
+mod damage;
 mod keys;
 mod raster;
+
+#[cfg(target_os = "haiku")]
+mod gpu;
 
 #[cfg(target_os = "haiku")]
 #[path = "../../deckcraft/src/control_server.rs"]
@@ -22,6 +27,10 @@ mod host;
 #[cfg(target_os = "haiku")]
 #[path = "../../deckcraft/src/logging.rs"]
 mod logging;
+#[cfg(target_os = "haiku")]
+mod present;
+#[cfg(target_os = "haiku")]
+mod scanout;
 #[cfg(target_os = "haiku")]
 mod services;
 #[cfg(target_os = "haiku")]
@@ -205,7 +214,14 @@ OPTIONS:
         if args.show {
             app.start_show(0, false);
         }
-        let mut shell = shell::Shell::new(app, ctx, dialogs, scale);
+        let mut shell = match shell::Shell::new(app, ctx, dialogs, scale) {
+            Ok(shell) => shell,
+            Err(e) => {
+                log::error!("{e}");
+                host::alert("DeckCraft", &e);
+                return;
+            }
+        };
         shell.run();
         shell.finish();
     }

@@ -37,5 +37,13 @@ rayon = { workspace = true }
 # Pictures copied to the clipboard as PNG (egui's CopyImage).
 image = { workspace = true }
 
+[target.'cfg(target_os = "haiku")'.dependencies]
+# The GPU renderer (src/gpu.rs, src/present.rs): egui drawn with Vulkan, as PhotoCraft's host does.
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan"] }
+egui-wgpu = { version = "0.37", default-features = false }
+# The raw Vulkan device, to import the screen's frame buffer (src/scanout.rs); the version wgpu-hal uses.
+ash = "0.38"
+pollster = "1"
+
 [build-dependencies]
 cc = "1"
