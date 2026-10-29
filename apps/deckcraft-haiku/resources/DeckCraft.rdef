@@ -10,9 +10,10 @@ resource app_signature "application/x-vnd.storytold-DeckCraft";
 // Embed the type so resattr packages it even on a read-only package volume.
 resource(2, "BEOS:TYPE") #'MIMS' "application/x-vnd.Be-elfexecutable";
 
-// Each presentation opened from Tracker starts a window of its own process, as on
-// the other desktops; files opened while it runs arrive as B_REFS_RECEIVED.
-resource app_flags B_MULTIPLE_LAUNCH;
+// One copy runs: presentations opened from Tracker while it runs arrive in it as
+// B_REFS_RECEIVED, and a launch from Terminal hands its arguments over
+// (B_ARGV_RECEIVED) and ends.
+resource app_flags B_SINGLE_LAUNCH;
 
 resource app_version {
 	major = 0,

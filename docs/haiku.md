@@ -17,8 +17,8 @@ and WordCraft's recovery owner-lock fix. No sibling repository is needed to buil
 | Audio | `BSoundPlayer` (Media Kit), stereo float PCM; DeckCraft's existing decoder and mixer |
 | Movies | DeckCraft's own decoders (H.264, HEVC, VP9, AV1); others through the Media Kit (`BMediaFile`, Movies) |
 | Window | Opens where it was last closed (`window.json`), fitted onto the monitors there are now |
-| Opening files | Tracker's and dropped presentations open in the background; dropped pictures, sounds and movies are inserted |
-| Recovery | Haiku `flock` through rustix; other running instances keep their snapshots |
+| Opening files | Tracker's and dropped presentations open in the background; dropped pictures, sounds and movies are inserted; one running copy (`B_SINGLE_LAUNCH`) |
+| Recovery | Haiku `flock` through rustix; copies started from other files keep their snapshots |
 
 The full ribbon, slide canvas, thumbnails, notes, editing commands, PPTX and `.deckcraft`
 formats, PDF/image export, transitions and animations are the upstream Rust implementation.
@@ -105,7 +105,7 @@ Validated on the laptop with the installed package:
 - Fullscreen starts on the window's monitor; next-slide navigation and Escape restore the editor's frame.
 - Closing a dirty document prompts to save, including when closing during a show.
 - WAV playback advances through Media Kit's audio callback without an error (silent PCM used for the automated test).
-- Two live instances do not recover each other's unsaved work; after the owner exits, its text is recovered and can be saved.
+- Two live instances (from different files) do not recover each other's unsaved work; after the owner exits, its text is recovered and can be saved.
 - Package installation registers the app, icon, Deskbar entry and `.deckcraft` extension.
 
 Linux checks need ALSA development files. A font covering CJK (BIZ UDPGothic, OFL) is needed
@@ -196,6 +196,20 @@ Tracker, the command line and drops open the same way, one after the other, so a
 doesn't stop the window. A PowerPoint Show handed over last, and `--show`, still open at once to
 start the slide show.
 
+DeckCraft is `B_SINGLE_LAUNCH` (`DeckCraft.rdef`): one copy runs from each executable file.
+Presentations opened in Tracker while it runs (double-click, Open With, drops on its icon) arrive
+in the running copy as `B_REFS_RECEIVED`, and a launch from Terminal (`DeckCraft talk.pptx`)
+hands its arguments over (`B_ARGV_RECEIVED`, relative paths resolved against the launch's folder)
+and ends before it touches the log file, the preferences or the recovery records
+(`BApplication` reports `B_ALREADY_RUNNING`). They take the same path as Tracker's: in the
+background, a PowerPoint Show last starting its slide show, and `--show` opening its
+presentations at once and starting the show; other options (`--sample`, `--control`) are ignored.
+The window comes to the front, also for a launch without presentations. Closing or quitting asks
+about every presentation with unsaved changes, as before. A test copy that must run beside the
+installed one runs from a file of its own (copies from different files run side by side, each
+keeping its own recovery records), and a test build gets single launch only with the resources
+(`rc`/`xres` of `DeckCraft.rdef`, as `tools/haiku/package.sh` adds them).
+
 The window's frame and content size are saved in `~/config/settings/DeckCraft/window.json` when
 DeckCraft quits (the last frame that wasn't minimized or a slide show) and restored at the next
 start onto the monitor holding most of it (air/OS's `get_display_frame`, else the nearest one),
@@ -213,6 +227,8 @@ nor writes it.
 
 ## Revision history
 
+- 2026-10-29: one running copy; Tracker's opens and later launches go to it, `--show` and a
+  PowerPoint Show starting the slide show there (#2; Clipboard and opening files).
 - 2026-10-29: input methods compose in the slide's text (#5; Touchpad scrolling and input
   methods). `tools/haiku/input-probe.cpp` (built on air/OS with
   `g++ -o input-probe input-probe.cpp -lbe`) sends a running copy what a test machine can't

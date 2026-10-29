@@ -284,6 +284,17 @@ OPTIONS:
             }
         }));
         let args = args();
+        // Before the log file, the preferences or the recovery records are touched: a second
+        // launch (from Terminal; Tracker hands presentations to the running copy itself) passes
+        // its presentations to the running copy and ends.
+        match host::init(services::SIGNATURE) {
+            Ok(host::Launch::Started) => {}
+            Ok(host::Launch::HandedOver) => std::process::exit(0),
+            Err(e) => {
+                log::error!("{e}");
+                std::process::exit(1);
+            }
+        }
         if let Some(logger) = logger {
             match log_dir().filter(|_| prefs_enabled()) {
                 Some(dir) => match logger.attach_dir(&dir) {
@@ -292,10 +303,6 @@ OPTIONS:
                 },
                 None => logger.stderr_only(),
             }
-        }
-        if let Err(e) = host::init(services::SIGNATURE) {
-            log::error!("{e}");
-            std::process::exit(1);
         }
         if prefs_enabled() {
             services::claim_document_types();

@@ -338,10 +338,15 @@ impl Shell {
                 }
             }
             kind::CLOSE | kind::QUIT_REQUESTED => self.close_requested = true,
-            // Tracker's Open, Open With and drops on the icon, and files dropped on the window.
+            // Tracker's Open, Open With and drops on the icon, a later launch's files (one copy
+            // runs: B_SINGLE_LAUNCH), and files dropped on the window.
             kind::OPEN_FILES | kind::DROPPED_FILES => {
                 let paths: Vec<String> = text.lines().filter(|l| !l.is_empty()).map(str::to_owned).collect();
-                self.open_files(paths, ev.kind == kind::DROPPED_FILES);
+                if ev.kind == kind::OPEN_FILES && ev.id == 1 {
+                    self.show_files(&paths);
+                } else {
+                    self.open_files(paths, ev.kind == kind::DROPPED_FILES);
+                }
                 host::window_command(WindowCommand::Activate);
             }
             kind::IME => self.input_method(&ev, text),
@@ -397,6 +402,15 @@ impl Shell {
         if delta != egui::Vec2::ZERO {
             self.events.push(event(MouseWheelUnit::Point, delta, TouchPhase::Move));
         }
+    }
+
+    /// A later launch's `--show`, as at start-up (`main`): its presentations open at once and the
+    /// slide show starts on the one shown (with none, on the presentation already shown).
+    fn show_files(&mut self, paths: &[String]) {
+        for (f, e) in self.app.open_from_system(paths) {
+            self.app.set_status(format!("{f}: {e}"));
+        }
+        self.app.start_show(0, false);
     }
 
     /// Files the system hands over, without holding up the window: presentations are read and
@@ -482,11 +496,9 @@ impl Shell {
                 self.composing = false;
                 self.events.push(Event::Ime(ImeEvent::Commit(text)));
             }
-            host::ime::STOPPED => {
-                // Stopped without confirming: the pre-edit goes.
-                if std::mem::take(&mut self.composing) {
-                    self.events.push(Event::Ime(ImeEvent::Preedit { text: String::new(), active_range_chars: None }));
-                }
+            // Stopped without confirming: the pre-edit goes.
+            host::ime::STOPPED if std::mem::take(&mut self.composing) => {
+                self.events.push(Event::Ime(ImeEvent::Preedit { text: String::new(), active_range_chars: None }));
             }
             _ => {}
         }
