@@ -121,6 +121,39 @@ OPTIONS:
         }
     }
 
+    /// Where the window was when DeckCraft last quit: `window.json` in the settings folder (the
+    /// editor's own settings files have no place for it), the frame's top-left corner and the
+    /// content size in screen pixels.
+    const WINDOW_FILE: &str = "window.json";
+
+    fn saved_window() -> Option<([f32; 2], [f32; 2])> {
+        if !prefs_enabled() {
+            return None;
+        }
+        let bytes = std::fs::read(config_dir()?.join(WINDOW_FILE)).ok().filter(|b| b.len() < 4096)?;
+        let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        let num = |k: &str| v.get(k).and_then(serde_json::Value::as_f64).filter(|n| n.is_finite() && n.abs() < 1e6).map(|n| n as f32);
+        let (x, y, w, h) = (num("x")?, num("y")?, num("width")?, num("height")?);
+        (w >= 1.0 && h >= 1.0).then_some(([x, y], [w, h]))
+    }
+
+    /// Remember the window for the next run (see [`saved_window`]).
+    pub fn save_window(frame: [f32; 4]) {
+        if !prefs_enabled() {
+            return;
+        }
+        let Some(dir) = config_dir() else { return };
+        let [x, y, width, height] = frame;
+        let json = serde_json::json!({"x": x, "y": y, "width": width, "height": height}).to_string();
+        let path = dir.join(WINDOW_FILE);
+        let tmp = dir.join(".window.json.tmp");
+        let written = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&tmp, json)).and_then(|()| std::fs::rename(&tmp, &path));
+        if let Err(e) = written {
+            let _ = std::fs::remove_file(&tmp);
+            log::warn!("{}: {e}", path.display());
+        }
+    }
+
     fn build_sha() -> &'static str {
         option_env!("DECKCRAFT_BUILD_SHA").map(|s| s.get(..8).unwrap_or(s)).unwrap_or("dev")
     }
@@ -210,10 +243,12 @@ OPTIONS:
                 !me
             })
             .collect();
-        for (f, e) in app.open_from_system(&files) {
-            log::warn!("{f}: {e}");
-        }
+        // `--show` starts the show on what is open, so its files open first; otherwise they open
+        // in the background once the window draws, as Tracker's do.
         if args.show {
+            for (f, e) in app.open_from_system(&files) {
+                log::warn!("{f}: {e}");
+            }
             app.start_show(0, false);
         }
         let mut shell = match shell::Shell::new(app, ctx, dialogs, scale) {
@@ -224,6 +259,9 @@ OPTIONS:
                 return;
             }
         };
+        if !args.show {
+            shell.open_files(files, false);
+        }
         shell.run();
         shell.finish();
     }
@@ -273,11 +311,14 @@ OPTIONS:
         }
         let scale = host::ui_scale();
         let px = |v: f32| v * scale;
+        // Where it was last time, fitted onto the monitors there are now; else centred.
+        let saved = saved_window();
+        let min_size = MIN_SIZE.map(px);
         host::open_window(&host::WindowSpec {
             title: "DeckCraft".into(),
-            position: None,
-            size: DEFAULT_SIZE.map(px),
-            min_size: MIN_SIZE.map(px),
+            position: saved.map(|(at, _)| at),
+            size: saved.map_or(DEFAULT_SIZE.map(px), |(_, [w, h])| [w.max(min_size[0]), h.max(min_size[1])]),
+            min_size,
             zoomed: false,
         });
         let ui = std::thread::Builder::new().name("DeckCraft interface".into()).stack_size(16 << 20).spawn(move || {

@@ -2,18 +2,19 @@
 //! its frame, and egui's output goes back to the window and the system (title, cursor,
 //! clipboard, links) and, through Vulkan (`gpu`) or the software rasteriser, to the screen.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use deckcraft_ui_egui::SlideApp;
+use deckcraft_ui_egui::{InboxEvent, InboxFile, SlideApp};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Theme, ViewportCommand, ViewportEvent, ViewportId, ViewportInfo, pos2, vec2};
 
 use crate::host::{self, RawEvent, WindowCommand, kind};
 use crate::raster::Rasterizer;
-use crate::services::{self, Dialogs};
-use crate::{keys, save_prefs};
+use crate::services::{self, Dialogs, OBJECTS_MARKER};
+use crate::{keys, save_prefs, save_window};
 
 pub struct Shell {
     pub app: SlideApp,
@@ -49,6 +50,11 @@ pub struct Shell {
     to_type: Vec<(PathBuf, Instant)>,
     /// Each presentation's last saved state (its uid, path and saved copy), to notice a save.
     last_saved: Vec<(u64, Option<String>, usize)>,
+    /// Presentations waiting to be opened in the background, one after the other.
+    to_open: VecDeque<String>,
+    /// The window's frame corner and content size while it was last an ordinary window (not
+    /// minimized, not a slide show), saved for the next run.
+    window_frame: Option<[f32; 4]>,
 }
 
 /// egui's cursor as one of Haiku's `BCursorID`s.
@@ -162,6 +168,8 @@ impl Shell {
             title: String::new(),
             to_type: Vec::new(),
             last_saved: Vec::new(),
+            to_open: VecDeque::new(),
+            window_frame: None,
         })
     }
 
@@ -307,15 +315,10 @@ impl Shell {
                 }
             }
             kind::CLOSE | kind::QUIT_REQUESTED => self.close_requested = true,
-            // Tracker's Open, Open With and drops on the icon, and files dropped on the
-            // window: they open as presentations, as File › Open opens them (the desktop app
-            // opens dropped files the same way). Each replaces an untouched blank Book1.
+            // Tracker's Open, Open With and drops on the icon, and files dropped on the window.
             kind::OPEN_FILES | kind::DROPPED_FILES => {
-                // A PowerPoint Show opened last starts its slide show, as on the desktop.
                 let paths: Vec<String> = text.lines().filter(|l| !l.is_empty()).map(str::to_owned).collect();
-                for (_, e) in self.app.open_from_system(&paths) {
-                    self.app.set_status(e);
-                }
+                self.open_files(paths, ev.kind == kind::DROPPED_FILES);
                 host::window_command(WindowCommand::Activate);
             }
             kind::COLORS => self.check_density(),
@@ -323,6 +326,69 @@ impl Shell {
             kind::RESIZED | kind::MOVED | kind::MINIMIZED => {}
             // A panel's answer after its caller stopped waiting has nobody to go to.
             _ => {}
+        }
+    }
+
+    /// Files the system hands over, without holding up the window: presentations are read and
+    /// parsed in the background behind the editor's progress window (File › Open's way), one
+    /// after the other, each replacing an untouched blank presentation. Tracker's other files
+    /// (outlines) open as the desktop app opens them, and a PowerPoint Show handed over last
+    /// starts its slide show at once. Files `dropped` on the window open or are inserted as the
+    /// desktop app's drops are (a picture, sound or movie onto the slide shown when it was
+    /// dropped), read on a thread and delivered through the editor's inbox.
+    pub fn open_files(&mut self, paths: Vec<String>, dropped: bool) {
+        if !dropped && paths.last().is_some_and(|p| p.to_ascii_lowercase().ends_with(".ppsx")) {
+            for (_, e) in self.app.open_from_system(&paths) {
+                self.app.set_status(e);
+            }
+            return;
+        }
+        for path in paths {
+            if is_presentation(&path) {
+                self.to_open.push_back(path);
+            } else if dropped {
+                self.read_dropped(path);
+            } else {
+                for (_, e) in self.app.open_from_system(std::slice::from_ref(&path)) {
+                    self.app.set_status(e);
+                }
+            }
+        }
+        self.open_next();
+    }
+
+    /// The next waiting presentation, once the one before it has opened.
+    fn open_next(&mut self) {
+        if self.app.opening.is_none()
+            && let Some(path) = self.to_open.pop_front()
+        {
+            self.app.open_path_in_background(&path);
+            self.repaint_at = Some(Instant::now());
+        }
+    }
+
+    /// A dropped file for the slide shown now, read on a thread into the editor's inbox.
+    fn read_dropped(&mut self, path: String) {
+        let Some(inbox) = self.app.services.inbox.clone() else { return };
+        let id = self.app.begin_external_file("drop");
+        let name = std::path::Path::new(&path).file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+        let ctx = self.ctx.clone();
+        let read = move || {
+            let event = match std::fs::read(&path) {
+                Ok(bytes) => InboxEvent::File(InboxFile { id, name, bytes }),
+                Err(e) => {
+                    log::warn!("{path}: {e}");
+                    InboxEvent::Cancelled { id }
+                }
+            };
+            match inbox.lock() {
+                Ok(mut events) => events.push(event),
+                Err(poisoned) => poisoned.into_inner().push(event),
+            }
+            ctx.request_repaint();
+        };
+        if let Err(e) = std::thread::Builder::new().name("DeckCraft read".into()).spawn(read) {
+            log::warn!("couldn't read the dropped file: {e}");
         }
     }
 
@@ -346,9 +412,7 @@ impl Shell {
                     return;
                 }
                 if m.command && active == Key::V || m.shift && active == Key::Insert {
-                    if let Some(t) = services::clipboard_text().map(|t| t.replace("\r\n", "\n")) {
-                        self.events.push(Event::Paste(t));
-                    }
+                    self.paste();
                     return;
                 }
             }
@@ -356,6 +420,16 @@ impl Shell {
         }
         if pressed && let Some(t) = keys::text(bits, text) {
             self.events.push(Event::Text(t.to_string()));
+        }
+    }
+
+    /// Paste: the clipboard's text, or, without text, an empty paste, which the editor answers
+    /// with the clipboard's picture (`Services::clipboard_image`).
+    fn paste(&mut self) {
+        match services::clipboard_text() {
+            Some(t) => self.events.push(Event::Paste(t.replace("\r\n", "\n"))),
+            None if services::clipboard_has_picture() => self.events.push(Event::Paste(String::new())),
+            None => {}
         }
     }
 
@@ -382,6 +456,7 @@ impl Shell {
     /// close button, which waits for a print job being handed over.
     fn logic(&mut self, ctx: &egui::Context) {
         self.app.logic(ctx);
+        self.open_next();
     }
 
     fn frame(&mut self) {
@@ -398,6 +473,12 @@ impl Shell {
             return;
         }
         let close = std::mem::take(&mut self.close_requested);
+        let window = host::window_info();
+        if !window.fullscreen && !window.minimized {
+            let [left, top, ..] = window.outer;
+            let [l, t, r, b] = window.inner;
+            self.window_frame = Some([left, top, r - l, b - t]);
+        }
         let raw = egui::RawInput {
             viewport_id: ViewportId::ROOT,
             viewports: std::iter::once((ViewportId::ROOT, self.viewport_info(close))).collect(),
@@ -433,7 +514,11 @@ impl Shell {
             log::debug!("output {cmd:?}");
             match cmd {
                 egui::OutputCommand::CopyText(t) => {
-                    if !host::clipboard_set(t, None) {
+                    // Copied shapes without text (pictures, drawings) leave the editor's marker
+                    // as their text; other programs also get a picture of them.
+                    let copied = (t == OBJECTS_MARKER).then(|| deckcraft_engine::cmd::edit::copied_shapes_png(&self.app.session)).flatten();
+                    log::debug!("copy: picture of the shapes {:?}", copied.as_ref().map(Vec::len));
+                    if !copied.is_some_and(|png| copy_picture(Some(t), png)) && !host::clipboard_set(t, None) {
                         log::warn!("clipboard: couldn't copy");
                     }
                 }
@@ -552,11 +637,7 @@ impl Shell {
             ViewportCommand::Screenshot(data) => self.screenshots.push(data.clone()),
             ViewportCommand::RequestCut => self.events.push(Event::Cut),
             ViewportCommand::RequestCopy => self.events.push(Event::Copy),
-            ViewportCommand::RequestPaste => {
-                if let Some(t) = services::clipboard_text() {
-                    self.events.push(Event::Paste(t.replace("\r\n", "\n")));
-                }
-            }
+            ViewportCommand::RequestPaste => self.paste(),
             _ => {}
         }
     }
@@ -596,23 +677,50 @@ impl Shell {
     /// What quitting does besides closing the window (`on_exit` in the desktop app).
     pub fn finish(&mut self) {
         save_prefs(&self.app);
+        if let Some(frame) = self.window_frame {
+            save_window(frame);
+        }
     }
 }
 
-/// egui's image copy, as PNG.
+/// A presentation by its name, as the editor tells one from other files it opens.
+fn is_presentation(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    [".deckcraft", ".slidecraft", ".pptx", ".potx", ".ppsx"].iter().any(|e| lower.ends_with(e))
+}
+
+/// egui's image copy, as PNG and as an archived BBitmap, which Haiku programs (ShowImage,
+/// WonderBrush) paste.
 fn copy_image(img: &egui::ColorImage) {
     let [w, h] = img.size;
     let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
     let mut png = Vec::new();
-    let encoded = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+    let encoded = image::RgbaImage::from_raw(w as u32, h as u32, rgba.clone())
         .ok_or_else(|| "bad size".to_string())
         .and_then(|i| i.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).map_err(|e| e.to_string()));
     match encoded {
         Ok(()) => {
-            if !host::clipboard_set_picture("image/png", &png) {
+            if !host::clipboard_set_image(None, &png, &rgba, w, h) {
                 log::warn!("clipboard: couldn't copy the picture");
             }
         }
         Err(e) => log::warn!("clipboard picture: {e}"),
     }
+}
+
+/// Puts a PNG picture on the clipboard with `text`, also as an archived BBitmap. Whether it did.
+fn copy_picture(text: Option<&str>, png: Vec<u8>) -> bool {
+    let rgba = match image::load_from_memory_with_format(&png, image::ImageFormat::Png) {
+        Ok(img) => img.to_rgba8(),
+        Err(e) => {
+            log::warn!("clipboard picture: {e}");
+            return false;
+        }
+    };
+    let (w, h) = (rgba.width() as usize, rgba.height() as usize);
+    let copied = host::clipboard_set_image(text, &png, rgba.as_raw(), w, h);
+    if !copied {
+        log::warn!("clipboard: couldn't copy a {w}x{h} picture");
+    }
+    copied
 }

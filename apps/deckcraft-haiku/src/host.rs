@@ -59,7 +59,7 @@ pub mod kind {
 
 unsafe extern "C" {
     fn dc_host_init(signature: *const c_char) -> i32;
-    fn dc_host_open_window(title: *const c_char, x: f32, y: f32, w: f32, h: f32, min_w: f32, min_h: f32, zoomed: i32) -> i32;
+    fn dc_host_open_window(title: *const c_char, placed: i32, x: f32, y: f32, w: f32, h: f32, min_w: f32, min_h: f32, zoomed: i32) -> i32;
     fn dc_host_run();
     fn dc_host_quit();
     fn dc_host_wait(timeout_us: i64) -> i32;
@@ -82,7 +82,9 @@ unsafe extern "C" {
     fn dc_free(data: *mut c_void);
     fn dc_clipboard_get(mime: *const c_char, len: *mut usize) -> *mut c_void;
     fn dc_clipboard_set(text: *const c_char, text_len: usize, html: *const c_char, html_len: usize) -> i32;
-    fn dc_clipboard_set_picture(mime: *const c_char, data: *const c_void, len: usize) -> i32;
+    fn dc_clipboard_bitmap(w: *mut i32, h: *mut i32) -> *mut c_void;
+    fn dc_clipboard_has_picture(types: *const c_char) -> i32;
+    fn dc_clipboard_set_image(text: *const c_char, text_len: usize, png: *const c_void, png_len: usize, rgba: *const u8, w: i32, h: i32) -> i32;
     fn dc_host_file_panel(id: i32, save: i32, name: *const c_char, extensions: *const c_char, title: *const c_char) -> i32;
     fn dc_host_open_url(url: *const c_char) -> i32;
     fn dc_host_alert(title: *const c_char, text: *const c_char);
@@ -129,7 +131,8 @@ pub fn init(signature: &str) -> Result<(), String> {
     }
 }
 
-/// Where and how big the window opens: content top-left (`None`: centred) and content size.
+/// Where and how big the window opens: the frame's top-left corner, tab and border included
+/// (`None`: centred; a position is fitted onto the monitors there are), and the content size.
 pub struct WindowSpec {
     pub title: String,
     pub position: Option<[f32; 2]>,
@@ -140,10 +143,11 @@ pub struct WindowSpec {
 
 pub fn open_window(spec: &WindowSpec) {
     let title = c(&spec.title);
-    let [x, y] = spec.position.unwrap_or([-1.0, -1.0]);
+    let [x, y] = spec.position.unwrap_or_default();
+    let placed = i32::from(spec.position.is_some());
     // SAFETY: a valid C string; the host copies it.
     unsafe {
-        dc_host_open_window(title.as_ptr(), x, y, spec.size[0], spec.size[1], spec.min_size[0], spec.min_size[1], i32::from(spec.zoomed));
+        dc_host_open_window(title.as_ptr(), placed, x, y, spec.size[0], spec.size[1], spec.min_size[0], spec.min_size[1], i32::from(spec.zoomed));
     }
 }
 
@@ -432,11 +436,34 @@ pub fn clipboard_set(text: &str, html: Option<&str>) -> bool {
     unsafe { dc_clipboard_set(text.as_ptr().cast(), text.len(), h, hl) == 0 }
 }
 
-/// Replaces the clipboard with an encoded picture.
-pub fn clipboard_set_picture(mime: &str, data: &[u8]) -> bool {
-    let m = c(mime);
-    // SAFETY: valid buffers the host copies.
-    unsafe { dc_clipboard_set_picture(m.as_ptr(), data.as_ptr().cast(), data.len()) == 0 }
+/// A picture another Haiku program put on the clipboard as an archived BBitmap: width, height,
+/// straight RGBA.
+pub fn clipboard_bitmap() -> Option<(usize, usize, Vec<u8>)> {
+    let (mut w, mut h) = (0i32, 0i32);
+    // SAFETY: two writable ints; the pixels come back malloc'd, w × h × 4 bytes.
+    let p = unsafe { dc_clipboard_bitmap(&mut w, &mut h) };
+    let (w, h) = (usize::try_from(w).ok()?, usize::try_from(h).ok()?);
+    let rgba = take_bytes(p, w.checked_mul(h)?.checked_mul(4)?)?;
+    Some((w, h, rgba))
+}
+
+/// Whether the clipboard holds an archived BBitmap or data of one of the picture `types`.
+pub fn clipboard_has_picture(types: &[&str]) -> bool {
+    let t = c(&types.join("\n"));
+    // SAFETY: a valid C string.
+    unsafe { dc_clipboard_has_picture(t.as_ptr()) != 0 }
+}
+
+/// Replaces the clipboard with a picture: its PNG and, for Haiku programs, an archived BBitmap
+/// of the straight-RGBA pixels (`width` × `height` × 4 bytes); with `text` when given.
+pub fn clipboard_set_image(text: Option<&str>, png: &[u8], rgba: &[u8], width: usize, height: usize) -> bool {
+    let (Ok(w), Ok(h)) = (i32::try_from(width), i32::try_from(height)) else { return false };
+    if width.checked_mul(height).and_then(|n| n.checked_mul(4)) != Some(rgba.len()) {
+        return false;
+    }
+    let (t, tl) = text.map_or((std::ptr::null(), 0), |t| (t.as_ptr().cast::<c_char>(), t.len()));
+    // SAFETY: `rgba` holds width × height × 4 bytes (checked); the host copies every buffer.
+    unsafe { dc_clipboard_set_image(t, tl, png.as_ptr().cast(), png.len(), rgba.as_ptr(), w, h) == 0 }
 }
 
 /// Shows an Open panel (offering `extensions`; `*` is any file) or a Save panel (suggesting

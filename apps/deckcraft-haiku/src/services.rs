@@ -1,5 +1,5 @@
 //! The app's system services on air/OS: Open and Save panels (`BFilePanel`), the clipboard
-//! (`BClipboard`: text and HTML), links, and making DeckCraft the preferred application for
+//! (`BClipboard`: text, HTML and pictures, as PNG and archived BBitmaps), links, and making DeckCraft the preferred application for
 //! presentations (`BMimeType`).
 
 use std::cell::{Cell, RefCell};
@@ -71,10 +71,72 @@ pub fn clipboard_text() -> Option<String> {
     clip_text("text/plain")
 }
 
+/// Picture types other programs put on the clipboard encoded, best first.
+const PICTURE_TYPES: [&str; 6] = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/tiff"];
+
+/// Larger encoded pictures on the clipboard are not read.
+const MAX_PICTURE_BYTES: usize = 256 << 20;
+
+/// Whether there's a picture to paste (the shell's Paste with no text on the clipboard).
+pub fn clipboard_has_picture() -> bool {
+    host::clipboard_has_picture(&PICTURE_TYPES)
+}
+
+fn png_of(width: usize, height: usize, rgba: Vec<u8>) -> Option<Vec<u8>> {
+    let img = image::RgbaImage::from_raw(u32::try_from(width).ok()?, u32::try_from(height).ok()?, rgba)?;
+    let mut png = Vec::new();
+    match img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png) {
+        Ok(()) => Some(png),
+        Err(e) => {
+            log::warn!("clipboard picture: {e}");
+            None
+        }
+    }
+}
+
+/// The text DeckCraft copies with shapes (`OBJECTS_MARKER` in deckcraft-ui-egui), beside their
+/// picture for other programs (`shell::copy_picture`).
+pub const OBJECTS_MARKER: &str = "\u{2060}";
+
+/// The clipboard's picture as PNG (what the editor's `clipboard_image` takes): a BBitmap
+/// another Haiku program copied (ShowImage, Screenshot, WonderBrush, airShot), else PNG, else
+/// another encoded picture, converted. Not the picture of shapes DeckCraft copied: pasting
+/// those pastes the shapes themselves.
+fn clipboard_image() -> Option<Vec<u8>> {
+    if clipboard_text().as_deref() == Some(OBJECTS_MARKER) {
+        return None;
+    }
+    if let Some((w, h, rgba)) = host::clipboard_bitmap() {
+        return png_of(w, h, rgba);
+    }
+    if let Some(png) = host::clipboard_get("image/png") {
+        return Some(png);
+    }
+    let bytes = PICTURE_TYPES[1..].iter().find_map(|m| host::clipboard_get(m)).filter(|b| b.len() <= MAX_PICTURE_BYTES)?;
+    match image::load_from_memory(&bytes) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            let (w, h) = (rgba.width() as usize, rgba.height() as usize);
+            png_of(w, h, rgba.into_raw())
+        }
+        Err(e) => {
+            log::warn!("clipboard picture: {e}");
+            None
+        }
+    }
+}
+
 /// Native panels, clipboard and Media Kit output for the unchanged presentation editor.
+///
+/// Of the asynchronous hooks only `inbox` is set: the shell reads files dropped on the window on
+/// a thread and delivers them there (`Shell::open_files`). `open_async` and `download` are the
+/// web's stand-ins for a file panel; the editor asks them only when `pick_open` / `pick_save`
+/// are missing, and it opens a presentation picked in the Open panel in the background itself
+/// (`open_path_in_background`), so the panels stay.
 pub fn services(dialogs: Rc<Dialogs>) -> Services {
     let open = dialogs.clone();
     Services {
+        inbox: Some(deckcraft_ui_egui::Inbox::default()),
         pick_open: Some(Box::new(move |purpose: &str| {
             let (extensions, title): (&[&str], &str) = match purpose {
                 "picture" => (&["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"], "Insert Picture"),
@@ -95,7 +157,7 @@ pub fn services(dialogs: Rc<Dialogs>) -> Services {
             host::type_file(std::path::Path::new(path));
             Ok(())
         })),
-        clipboard_image: Some(Box::new(|| host::clipboard_get("image/png"))),
+        clipboard_image: Some(Box::new(clipboard_image)),
         clipboard_html: Some(Box::new(|| clip_text("text/html"))),
         clipboard_set_html: Some(Box::new(|html, text| host::clipboard_set(text, Some(html)))),
         audio_out: std::env::var_os("DECKCRAFT_NO_AUDIO")

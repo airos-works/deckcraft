@@ -649,6 +649,39 @@ MonitorFrame(BWindow* window)
 }
 
 
+// Puts a window placed where it was last time onto the monitors there are
+// now: onto the one holding most of its frame (air/OS's get_display_frame
+// picks the nearest when none holds any), shrunk to fit it, and moved in
+// until its tab and borders are on it.
+static void
+FitOnMonitor(BWindow* window, float minWidth, float minHeight)
+{
+	BRect display = MonitorFrame(window);
+	BRect inner = window->Frame();
+	BRect outer = window->DecoratorFrame();
+	float borderWidth = outer.Width() - inner.Width();
+	float borderHeight = outer.Height() - inner.Height();
+	float width = std::max(std::min(inner.Width(),
+		display.Width() - borderWidth), minWidth - 1);
+	float height = std::max(std::min(inner.Height(),
+		display.Height() - borderHeight), minHeight - 1);
+	if (width != inner.Width() || height != inner.Height())
+		window->ResizeTo(width, height);
+	outer = window->DecoratorFrame();
+	float dx = 0;
+	float dy = 0;
+	if (outer.right > display.right)
+		dx = display.right - outer.right;
+	if (outer.left + dx < display.left)
+		dx = display.left - outer.left;
+	if (outer.bottom > display.bottom)
+		dy = display.bottom - outer.bottom;
+	if (outer.top + dy < display.top)
+		dy = display.top - outer.top;
+	window->MoveBy(dx, dy);
+}
+
+
 // #pragma mark - File panels
 
 
@@ -828,22 +861,21 @@ dc_host_init(const char* signature)
 }
 
 
-// Opens the window: its frame's top-left corner at (x, y) (centred on the
-// screen when x is negative), content size width × height.
+// Opens the window: when placed, its frame's top-left corner (tab and border
+// included) at (x, y) and fitted onto the monitors there are, else centred on
+// the screen; content size width × height.
 int32_t
-dc_host_open_window(const char* title, float x, float y, float width,
-	float height, float minWidth, float minHeight, int32_t zoomed)
+dc_host_open_window(const char* title, int32_t placed, float x, float y,
+	float width, float height, float minWidth, float minHeight, int32_t zoomed)
 {
 	if (sWindow != NULL)
 		return 0;
 	BRect frame(0, 0, width - 1, height - 1);
-	BScreen screen;
-	BRect screenFrame = screen.Frame();
-	if (x >= 0 && y >= 0)
+	if (placed)
 		frame.OffsetTo(x, y);
 	sWindow = new DcWindow(frame, title);
 	sWindow->SetSizeLimits(minWidth - 1, 32768, minHeight - 1, 32768);
-	if (x < 0 || y < 0 || !screenFrame.Intersects(frame)) {
+	if (!placed) {
 		// A default size larger than the monitor (a small or dense display)
 		// shrinks to fit it, with room for the tab, borders and Deskbar.
 		BRect monitor = MonitorFrame(sWindow);
@@ -860,6 +892,7 @@ dc_host_open_window(const char* title, float x, float y, float width,
 		// (x, y) is where the frame's corner goes, tab and border included.
 		BRect outer = sWindow->DecoratorFrame();
 		sWindow->MoveBy(frame.left - outer.left, frame.top - outer.top);
+		FitOnMonitor(sWindow, minWidth, minHeight);
 	}
 	if (zoomed)
 		sWindow->Zoom();
@@ -1247,17 +1280,126 @@ dc_clipboard_set(const char* text, size_t textLength, const char* html,
 }
 
 
-// Puts an encoded picture (PNG) on the clipboard.
-int32_t
-dc_clipboard_set_picture(const char* type, const void* data, size_t length)
+// A picture another Haiku program copied as an archived BBitmap
+// ("image/bitmap", as ShowImage, Screenshot, WonderBrush and airShot do, or
+// "image/x-be-bitmap"), as straight RGBA (malloc'd; NULL when there's none).
+// From WordCraft's host (wc_clipboard_bitmap).
+void*
+dc_clipboard_bitmap(int32_t* width, int32_t* height)
 {
+	*width = 0;
+	*height = 0;
+	BMessage archive;
+	bool found = false;
+	if (be_clipboard->Lock()) {
+		BMessage* clip = be_clipboard->Data();
+		found = clip != NULL
+			&& (clip->FindMessage("image/bitmap", &archive) == B_OK
+				|| clip->FindMessage("image/x-be-bitmap", &archive) == B_OK);
+		be_clipboard->Unlock();
+	}
+	if (!found)
+		return NULL;
+	BBitmap source(&archive);
+	if (source.InitCheck() != B_OK)
+		return NULL;
+	BRect bounds = source.Bounds();
+	int32 w = bounds.IntegerWidth() + 1;
+	int32 h = bounds.IntegerHeight() + 1;
+	if (w <= 0 || h <= 0 || w > 16000 || h > 16000)
+		return NULL;
+	BBitmap converted(bounds, B_RGBA32);
+	if (converted.InitCheck() != B_OK || converted.ImportBits(&source) != B_OK)
+		return NULL;
+	uint8* rgba = (uint8*)malloc((size_t)w * h * 4);
+	if (rgba == NULL)
+		return NULL;
+	bool opaque = source.ColorSpace() == B_RGB32 || source.ColorSpace() == B_RGB24
+		|| source.ColorSpace() == B_RGB16 || source.ColorSpace() == B_CMAP8;
+	const uint8* bits = (const uint8*)converted.Bits();
+	for (int32 y = 0; y < h; y++) {
+		const uint8* row = bits + (size_t)y * converted.BytesPerRow();
+		uint8* out = rgba + (size_t)y * w * 4;
+		for (int32 x = 0; x < w; x++) {
+			out[x * 4 + 0] = row[x * 4 + 2];
+			out[x * 4 + 1] = row[x * 4 + 1];
+			out[x * 4 + 2] = row[x * 4 + 0];
+			out[x * 4 + 3] = opaque ? 255 : row[x * 4 + 3];
+		}
+	}
+	*width = w;
+	*height = h;
+	return rgba;
+}
+
+
+// Whether the clipboard holds a picture DeckCraft can paste: an archived
+// BBitmap or encoded data of one of the types (one per line).
+int32_t
+dc_clipboard_has_picture(const char* types)
+{
+	bool has = false;
+	if (!be_clipboard->Lock())
+		return 0;
+	BMessage* clip = be_clipboard->Data();
+	if (clip != NULL) {
+		has = clip->HasMessage("image/bitmap")
+			|| clip->HasMessage("image/x-be-bitmap");
+		BString list(types);
+		int32 start = 0;
+		while (!has && start < list.Length()) {
+			int32 end = list.FindFirst('\n', start);
+			if (end < 0)
+				end = list.Length();
+			BString type;
+			list.CopyInto(type, start, end - start);
+			has = clip->HasData(type.String(), B_MIME_TYPE);
+			start = end + 1;
+		}
+	}
+	be_clipboard->Unlock();
+	return has ? 1 : 0;
+}
+
+
+// Puts a picture on the clipboard for every kind of program: as PNG
+// ("image/png") and as an archived B_RGBA32 BBitmap ("image/bitmap", which
+// ShowImage, WonderBrush and other Haiku programs paste), with text when it
+// isn't NULL. rgba is width × height straight RGBA.
+int32_t
+dc_clipboard_set_image(const char* text, size_t textLength, const void* png,
+	size_t pngLength, const uint8_t* rgba, int32_t width, int32_t height)
+{
+	if (width <= 0 || height <= 0)
+		return -1;
+	BBitmap bitmap(BRect(0, 0, width - 1, height - 1), B_RGBA32);
+	if (bitmap.InitCheck() != B_OK)
+		return -1;
+	uint8* bits = (uint8*)bitmap.Bits();
+	for (int32 y = 0; y < height; y++) {
+		const uint8* in = rgba + (size_t)y * width * 4;
+		uint8* row = bits + (size_t)y * bitmap.BytesPerRow();
+		for (int32 x = 0; x < width; x++) {
+			row[x * 4 + 0] = in[x * 4 + 2];
+			row[x * 4 + 1] = in[x * 4 + 1];
+			row[x * 4 + 2] = in[x * 4 + 0];
+			row[x * 4 + 3] = in[x * 4 + 3];
+		}
+	}
+	BMessage archive;
+	if (bitmap.Archive(&archive) != B_OK)
+		return -1;
 	if (!be_clipboard->Lock())
 		return -1;
 	be_clipboard->Clear();
 	BMessage* clip = be_clipboard->Data();
 	status_t status = B_ERROR;
 	if (clip != NULL) {
-		status = clip->AddData(type, B_MIME_TYPE, data, length);
+		status = clip->AddMessage("image/bitmap", &archive);
+		if (status == B_OK && text != NULL)
+			status = clip->AddData("text/plain", B_MIME_TYPE, text, textLength);
+		if (status == B_OK && png != NULL && pngLength > 0)
+			status = clip->AddData("image/png", B_MIME_TYPE, png, pngLength);
 		if (status == B_OK)
 			status = be_clipboard->Commit();
 	}

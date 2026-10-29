@@ -3121,6 +3121,21 @@ fn paste_special_keeps_source_look_picture_or_text() {
     assert!(s.execute("edit.pasteSpecial", &json!({"as": "bogus"})).is_err());
 }
 
+/// A host can offer other programs a picture of the copied shapes, drawn as Paste Special ›
+/// Picture draws them; nothing when no shapes were copied.
+#[test]
+fn copied_shapes_draw_as_a_png_for_other_programs() {
+    let mut s = Session::with_new();
+    assert!(crate::cmd::edit::copied_shapes_png(&s).is_none());
+    let r = s.execute("shape.insert", &json!({"preset": "star5", "rect": [100, 100, 150, 150]})).unwrap();
+    s.execute("edit.copy", &json!({"ids": [r["id"]]})).unwrap();
+    let shapes = s.doc().unwrap().current_slide().unwrap().shapes.len();
+    let png = crate::cmd::edit::copied_shapes_png(&s).expect("a picture of the star");
+    assert!(png.starts_with(b"\x89PNG"));
+    // The document is untouched: drawing isn't pasting.
+    assert_eq!(s.doc().unwrap().current_slide().unwrap().shapes.len(), shapes);
+}
+
 /// Image export keeps the whole slide: the scale is lowered so the picture fits the renderer's
 /// largest side (past it the renderer clips, and big exports came out cropped).
 #[test]

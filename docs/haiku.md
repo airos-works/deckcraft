@@ -11,11 +11,13 @@ and WordCraft's recovery owner-lock fix. No sibling repository is needed to buil
 | Window and event loop | `BApplication`, `BWindow`, `BView` |
 | Drawing | Vulkan (egui-wgpu) on a hardware GPU, changed tiles shown in a `BBitmap`; else egui triangles rasterized on the CPU with dirty bands; HiDPI support |
 | Open / Save / insert media | `BFilePanel` |
-| Clipboard | `BClipboard`, text, HTML and PNG |
+| Clipboard | `BClipboard`: text, HTML, and pictures as PNG and archived `BBitmap`s (ShowImage, Screenshot, WonderBrush, airShot) both ways |
 | Cursors / locale / document types | `BCursor`, `BLocaleRoster`, `BMimeType` |
 | Slide show | Native borderless fullscreen on the current display; restores the editor's frame |
 | Audio | `BSoundPlayer` (Media Kit), stereo float PCM; DeckCraft's existing decoder and mixer |
 | Movies | DeckCraft's own decoders (H.264, HEVC, VP9, AV1); others through the Media Kit (`BMediaFile`, Movies) |
+| Window | Opens where it was last closed (`window.json`), fitted onto the monitors there are now |
+| Opening files | Tracker's and dropped presentations open in the background; dropped pictures, sounds and movies are inserted |
 | Recovery | Haiku `flock` through rustix; other running instances keep their snapshots |
 
 The full ribbon, slide canvas, thumbnails, notes, editing commands, PPTX and `.deckcraft`
@@ -143,6 +145,32 @@ new changes on it; MPEG lands after the time), so a seek there decodes from the 
 The ffmpeg WebM reader's frame count is wrong (hundreds of millions); the probe uses the duration
 times the frame rate instead.
 
+## Clipboard and opening files
+
+Paste takes, in order: text (with HTML), an archived `BBitmap` ("image/bitmap", or
+"image/x-be-bitmap") as ShowImage, Screenshot, WonderBrush and airShot copy, PNG, then JPEG, GIF,
+WebP, BMP or TIFF data. Command+V with only a picture on the clipboard inserts it (the ribbon's
+Paste, as upstream, pastes what DeckCraft itself copied). Copying shapes without text (a picture, a drawing) puts the editor's object marker
+text on the clipboard, as upstream does, and a picture of the shapes (drawn as Paste Special ›
+Picture draws them) as PNG and as an archived `BBitmap`, so they paste into Haiku programs; a
+paste back into DeckCraft still pastes the shapes.
+
+Of upstream's asynchronous `Services` hooks only `inbox` is set: files dropped on the window are
+read on a thread and handed to the editor there (a presentation opens; a picture, sound or movie
+is inserted on the slide shown when it was dropped, as the desktop app's drops are). `open_async`
+and `download` are the web build's stand-ins for file panels; the editor uses them only when
+`pick_open` / `pick_save` are missing, and it already opens a presentation picked in the Open
+panel on a thread with a progress window (`open_path_in_background`). Presentations from
+Tracker, the command line and drops open the same way, one after the other, so a large deck
+doesn't stop the window. A PowerPoint Show handed over last, and `--show`, still open at once to
+start the slide show.
+
+The window's frame and content size are saved in `~/config/settings/DeckCraft/window.json` when
+DeckCraft quits (the last frame that wasn't minimized or a slide show) and restored at the next
+start onto the monitor holding most of it (air/OS's `get_display_frame`, else the nearest one),
+shrunk to fit and moved in until its tab and borders show. `DECKCRAFT_NO_PREFS` neither reads
+nor writes it.
+
 ## Initial limitations
 
 - Slides are still rendered by the engine on the CPU; only the interface is drawn with Vulkan.
@@ -150,12 +178,14 @@ times the frame rate instead.
   is not implemented yet. Presenter view starts disabled to keep audience slides unobstructed.
 - Native IME composition is not forwarded yet; ordinary keyboard input and pasted Unicode work.
 - Native direct printing is not implemented; export a PDF to print through a PDF viewer.
-- Window geometry is not persisted, and the host does not expose native accessibility nodes.
-- Clipboard images currently accept PNG data, not archived native `BBitmap` messages.
+- The host does not expose native accessibility nodes.
 - This is the upstream alpha editor: its remaining format and editing limitations still apply.
 
 ## Revision history
 
+- 2026-10-29: archived `BBitmap`s on the clipboard both ways, files dropped on the window opened
+  or inserted through the editor's inbox, Tracker and command-line presentations opened in the
+  background, and the window's place remembered (#8; Clipboard and opening files).
 - 2026-10-29: movies (#7). DeckCraft's own H.264/HEVC/VP9/AV1 decoders already played movies on
   air/OS; the formats they don't read (Motion JPEG, MPEG-1/2, MPEG-4 Part 2, WMV, Theora, VP8,
   and WMA, MP2 and MP3-in-AVI audio) now play through the Media Kit (Movies).

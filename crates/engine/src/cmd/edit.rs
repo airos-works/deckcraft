@@ -469,6 +469,23 @@ pub(crate) fn bake_theme(shapes: &mut [Shape], scheme: &deckcraft_color::ColorSc
 
 /// Paste Special › Picture: the copied shapes drawn into one PNG picture.
 fn paste_picture(s: &mut Session) -> Result<Value> {
+    let (png, b, w, h) = draw_copied_shapes(s)?;
+    let st = s.doc()?;
+    let same_slide = s.clipboard.shapes.iter().any(|c| st.shape(c.id).is_some());
+    let off = if same_slide { s.prefs.duplicate_offset } else { 0.0 };
+    s.execute("insert.picture", &json!({"data": base64_encode(&png), "name": "Picture.png", "rect": [b.x0 - 8.0 + off, b.y0 - 8.0 + off, w, h]}))
+}
+
+/// The shapes on the session's clipboard drawn as one PNG picture, as Paste Special › Picture
+/// pastes them: for a host to offer other programs a picture of what was copied. `None` when
+/// no shapes were copied (text, slides) or they can't be drawn.
+pub fn copied_shapes_png(s: &Session) -> Option<Vec<u8>> {
+    draw_copied_shapes(s).ok().map(|(png, ..)| png)
+}
+
+/// The copied shapes drawn at twice their size with an 8 pt margin: the PNG, their bounds
+/// on the slide, and the picture's size in points.
+fn draw_copied_shapes(s: &Session) -> Result<(Vec<u8>, deckcraft_geom::Rect, f64, f64)> {
     let mut clip = s.clipboard.clone();
     if clip.shapes.is_empty() {
         return Err(bad("edit.pasteSpecial", "copy shapes first to paste them as a picture"));
@@ -497,10 +514,7 @@ fn paste_picture(s: &mut Session) -> Result<Value> {
     let img = deckcraft_render::render_shape(&doc, &slide, gid, SCALE).ok_or_else(|| bad("edit.pasteSpecial", "the shapes could not be drawn"))?;
     // render_shape draws the bounds plus an 8 pt margin (room for shadows and outlines).
     let (w, h) = (img.width as f64 / SCALE, img.height as f64 / SCALE);
-    let same_slide = clip.shapes.iter().any(|c| st.shape(c.id).is_some());
-    let off = if same_slide { s.prefs.duplicate_offset } else { 0.0 };
-    let png = img.to_png();
-    s.execute("insert.picture", &json!({"data": base64_encode(&png), "name": "Picture.png", "rect": [b.x0 - 8.0 + off, b.y0 - 8.0 + off, w, h]}))
+    Ok((img.to_png(), b, w, h))
 }
 
 fn paste_text(s: &mut Session, p: &Value) -> Result<Value> {
