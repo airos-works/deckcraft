@@ -446,6 +446,7 @@ public:
 			message->FindInt32("buttons", &event.buttons);
 			message->FindInt32("clicks", &event.clicks);
 		}
+		Track(message, where, event.buttons);
 		Push(event);
 	}
 
@@ -458,6 +459,7 @@ public:
 		BMessage* message = Window()->CurrentMessage();
 		if (message != NULL)
 			message->FindInt32("buttons", &event.buttons);
+		Track(message, where, event.buttons);
 		Push(event);
 	}
 
@@ -470,16 +472,13 @@ public:
 		BMessage* message = Window()->CurrentMessage();
 		if (message != NULL)
 			message->FindInt32("buttons", &event.buttons);
+		Track(message, where, event.buttons);
 		if (fDragging) {
 			// The interface asked to move or resize the window by this
 			// press (an undecorated window's own title bar or edge): the
 			// pointer moves the window, and the interface sees none of it.
 			if (event.buttons != 0) {
-				BPoint screen;
-				if (message == NULL
-					|| message->FindPoint("screen_where", &screen) != B_OK)
-					screen = ConvertToScreen(where);
-				DragTo(screen);
+				DragTo(fScreenWhere);
 				return;
 			}
 			fDragging = false;
@@ -489,18 +488,29 @@ public:
 		Push(event);
 	}
 
+	// Where the pointer is on the screen and which buttons are down, as the
+	// last mouse message said.
+	void Track(const BMessage* message, BPoint where, int32 buttons)
+	{
+		if (message == NULL
+			|| message->FindPoint("screen_where", &fScreenWhere) != B_OK)
+			fScreenWhere = ConvertToScreen(where);
+		fButtons = buttons;
+	}
+
 	// Called with the window locked: the pointer, while its button is down,
-	// moves the window (edges 0) or the window's edges (DC_EDGE_*).
+	// moves the window (edges 0) or the window's edges (DC_EDGE_*). The
+	// interface asks for it while it handles the press, after the window
+	// got it: by the mouse messages since, not the pointer's state now
+	// (GetMouse() then may see a quick press already up, or the pointer
+	// moved on, and the window would jump by that much).
 	void StartDrag(int32 edges)
 	{
-		BPoint where;
-		uint32 buttons;
-		GetMouse(&where, &buttons, false);
-		if (buttons == 0)
+		if (fButtons == 0)
 			return;
 		fDragging = true;
 		fDragEdges = edges;
-		fDragStart = ConvertToScreen(where);
+		fDragStart = fScreenWhere;
 		fDragFrame = Window()->Frame();
 	}
 
@@ -862,6 +872,8 @@ private:
 	int32 fDragEdges;
 	BPoint fDragStart;
 	BRect fDragFrame;
+	BPoint fScreenWhere;
+	int32 fButtons = 0;
 
 	// The input method transaction in progress (B_INPUT_METHOD_STARTED until
 	// B_INPUT_METHOD_STOPPED): where to answer, the text being composed (an
@@ -2192,7 +2204,6 @@ dc_host_open_url(const char* url)
 }
 
 
-
 // Shows a path in Tracker: a folder in a window of its own, a file selected in
 // its folder's window (as Tracker's own "Open parent" does). Tracker is
 // started when it doesn't run. A path as such: BUrl takes no bare path, and a
@@ -2224,6 +2235,7 @@ dc_host_reveal(const char* path)
 		return tracker.SendMessage(&message) == B_OK ? 0 : -1;
 	return be_roster->Launch(kTracker, &message) == B_OK ? 0 : -1;
 }
+
 
 
 
