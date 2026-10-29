@@ -161,6 +161,10 @@ DeckCraft), then that printer's paper and job setup (copies, pages, the driver's
 answers are kept per printer in `~/config/settings/DeckCraft/printers`. The job is sent on a
 worker with the driver's progress window, which can cancel it; the status bar then says how many
 sheets were spooled, or that printing was cancelled. Quitting waits for a job being sent.
+libprint's PostScript and PCL drivers start in monochrome: choose Color in the job setup. The
+print server's setup window starts the driver's job setup from its own settings for the printer
+(remembered there), not the application's, so the colour option WordCraft's backend has
+(`Options::color`, set for DeckCraft's jobs) only takes effect when a job names a printer.
 
 ## Windows, the slide show and the presenter view
 

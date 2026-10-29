@@ -143,7 +143,9 @@ fn clipboard_image() -> Option<Vec<u8>> {
 /// are kept for each printer in `printers` (`~/config/settings/DeckCraft/printers`).
 fn submit_print(title: &str, pdf: Vec<u8>, printers: Option<PathBuf>) -> Receiver<Result<String, String>> {
     let (tx, rx) = channel();
-    let options = print::Options { title: title.to_owned(), setup: true, ..print::Options::default() };
+    // libprint's PostScript and PCL drivers start in monochrome: slides print in colour unless
+    // the printer's job setup says otherwise.
+    let options = print::Options { title: title.to_owned(), setup: true, color: true, ..print::Options::default() };
     let store = print::Store::new(printers);
     let spawned = std::thread::Builder::new().name("print".into()).spawn(move || {
         let started = std::time::Instant::now();
