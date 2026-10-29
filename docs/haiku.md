@@ -153,6 +153,18 @@ the command palette, and the command itself (still reachable from the control ch
 that SoftwareUpdater installs newer versions. The community (Discord) links in About and File ›
 Info stay; they open the web browser.
 
+## Touchpad scrolling
+
+air/OS's mouse add-on marks a touchpad's scroll gesture (`B_MOUSE_WHEEL_CHANGED` with
+`be:device_subtype` 2, the unrounded `be:wheel_precise_delta_x/y` and `be:wheel_phase`). The host
+sends those as egui trackpad scrolling in points (a wheel step is egui's line,
+`InputOptions::line_scroll_speed`), with the gesture's start and end phases, so DeckCraft treats
+it as the desktop app treats a trackpad: a zoomed-in slide follows the fingers, and at the fitted
+size a flick turns one slide (with the trackpad's cooldown) while a resting finger turns none. A
+mouse wheel (no precise deltas) still sends whole lines, one slide per notch. The end of a
+gesture that arrives with its last movement is held for the next frame (egui drops the deltas of
+a gesture that ended). There's no pinch gesture: Command+wheel and the zoom slider zoom.
+
 ## Clipboard and opening files
 
 Paste takes, in order: text (with HTML), an archived `BBitmap` ("image/bitmap", or
@@ -191,6 +203,8 @@ nor writes it.
 
 ## Revision history
 
+- 2026-10-29: a touchpad's scrolling is a trackpad's, a wheel's stays lines (#3; Touchpad
+  scrolling).
 - 2026-10-29: Check for Updates says SoftwareUpdater updates the package (#4; Updates).
 - 2026-10-29: archived `BBitmap`s on the clipboard both ways, files dropped on the window opened
   or inserted through the editor's inbox, Tracker and command-line presentations opened in the
