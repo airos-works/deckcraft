@@ -11,6 +11,11 @@ pub type OpenAsyncFn = Box<dyn FnMut(&str, u64)>;
 
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
 
+/// `(job title, print PDF)`: the host prints it (choosing the printer, as its print setup does)
+/// on a worker, and the receiver gets what happened: a receipt for the status bar, or the error
+/// (empty when the user cancelled).
+pub type PrintFn = Box<dyn FnMut(&str, Vec<u8>) -> std::sync::mpsc::Receiver<Result<String, String>>>;
+
 /// A file the host finished reading for the request `id` from [`SlideApp::begin_external_file`].
 #[derive(Clone, Debug)]
 pub struct InboxFile {
@@ -56,4 +61,7 @@ pub struct Services {
     pub clipboard_set_html: Option<Box<dyn FnMut(&str, &str) -> bool>>,
     /// Audio output for media playback (cpal on desktop); without one media plays silently.
     pub audio_out: Option<Box<dyn deckcraft_media::AudioOut>>,
+    /// Print a PDF of File › Print's pages on a printer of the system (air/OS's print kit).
+    /// Without one, Print opens that PDF in the PDF viewer to print from there.
+    pub print: Option<PrintFn>,
 }

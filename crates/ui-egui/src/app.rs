@@ -79,6 +79,7 @@ impl SlideApp {
             pending_urls: vec![],
             #[cfg(not(target_arch = "wasm32"))]
             updates_rt: updates_ui::Runtime::default(),
+            printing: None,
             pending_copy: None,
             capture: capture::Capture::default(),
             styled: false,
@@ -214,6 +215,7 @@ impl SlideApp {
         if !self.synthetic_batch_is_live(ctx) {
             self.drain_control(ctx);
             self.poll_opening();
+            self.poll_printing(ctx);
             #[cfg(not(target_arch = "wasm32"))]
             updates_ui::tick(self, ctx);
             // Inbox results are host file bytes and do not need fonts or a painted frame. A

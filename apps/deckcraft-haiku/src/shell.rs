@@ -75,7 +75,9 @@ impl Shell {
 
     /// Runs until the app quits.
     pub fn run(&mut self) {
-        while !self.quit {
+        // A print job still being sent to the printer finishes first (its worker would die with
+        // the process); the windows keep drawing until then.
+        while !self.quit || self.app.printing_busy() {
             host::wait(self.viewports.timeout());
             self.drain();
             if self.dev_checked.elapsed() > Duration::from_secs(2) {

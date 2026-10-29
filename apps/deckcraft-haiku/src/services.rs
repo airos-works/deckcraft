@@ -1,15 +1,18 @@
 //! The app's system services on air/OS: Open and Save panels (`BFilePanel`), the clipboard
-//! (`BClipboard`: text, HTML and pictures, as PNG and archived BBitmaps), links, and making DeckCraft the preferred application for
-//! presentations (`BMimeType`).
+//! (`BClipboard`: text, HTML and pictures, as PNG and archived BBitmaps), links, printing (the
+//! print kit, `src/print.rs`), and making DeckCraft the preferred application for presentations
+//! (`BMimeType`).
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, channel};
 
 use deckcraft_ui_egui::Services;
 
 use crate::host::{self, RawEvent, kind};
+use crate::print;
 
 /// The application's signature (also in `DeckCraft.rdef`).
 pub const SIGNATURE: &str = "application/x-vnd.storytold-DeckCraft";
@@ -133,7 +136,32 @@ fn clipboard_image() -> Option<Vec<u8>> {
 /// web's stand-ins for a file panel; the editor asks them only when `pick_open` / `pick_save`
 /// are missing, and it opens a presentation picked in the Open panel in the background itself
 /// (`open_path_in_background`), so the panels stay.
-pub fn services(dialogs: Rc<Dialogs>) -> Services {
+/// File › Print's Print: the PDF of the Print page's pages (slides, notes pages or handouts, on
+/// its paper) drawn into a `BPrintJob` on a worker. DeckCraft's Print page has no printer list,
+/// so the system's print setup asks for the printer (its window has the printer menu) and then
+/// shows that printer's page and job setup (paper, copies, the driver's options); their answers
+/// are kept for each printer in `printers` (`~/config/settings/DeckCraft/printers`).
+fn submit_print(title: &str, pdf: Vec<u8>, printers: Option<PathBuf>) -> Receiver<Result<String, String>> {
+    let (tx, rx) = channel();
+    let options = print::Options { title: title.to_owned(), setup: true, ..print::Options::default() };
+    let store = print::Store::new(printers);
+    let spawned = std::thread::Builder::new().name("print".into()).spawn(move || {
+        let started = std::time::Instant::now();
+        let result = print::print_pdf(None, pdf, &options, &store);
+        match &result {
+            Ok(receipt) => log::info!("printed in {:.1} s: {receipt}", started.elapsed().as_secs_f32()),
+            Err(e) => log::warn!("printing: {e}"),
+        }
+        let _ = tx.send(result.map_err(|e| if e == print::Error::Cancelled { String::new() } else { e.to_string() }));
+    });
+    if let Err(e) = spawned {
+        log::error!("starting the print worker: {e}");
+    }
+    rx
+}
+
+/// The app's services; `printers` keeps each printer's setup answers (none: not kept).
+pub fn services(dialogs: Rc<Dialogs>, printers: Option<PathBuf>) -> Services {
     let open = dialogs.clone();
     Services {
         inbox: Some(deckcraft_ui_egui::Inbox::default()),
@@ -158,6 +186,7 @@ pub fn services(dialogs: Rc<Dialogs>) -> Services {
             Ok(())
         })),
         clipboard_image: Some(Box::new(clipboard_image)),
+        print: Some(Box::new(move |title, pdf| submit_print(title, pdf, printers.clone()))),
         clipboard_html: Some(Box::new(|| clip_text("text/html"))),
         clipboard_set_html: Some(Box::new(|html, text| host::clipboard_set(text, Some(html)))),
         audio_out: std::env::var_os("DECKCRAFT_NO_AUDIO")

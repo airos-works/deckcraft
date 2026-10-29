@@ -14,6 +14,9 @@
 
 mod damage;
 mod keys;
+// WordCraft's print kit module, unchanged; DeckCraft has no printer list and uses `print_pdf`.
+#[allow(dead_code)]
+mod print;
 mod raster;
 mod viewports;
 
@@ -216,7 +219,7 @@ OPTIONS:
             log::warn!("sample: {e}");
         }
         let dialogs = Rc::new(services::Dialogs::default());
-        let mut app = SlideApp::new(session, services::services(dialogs.clone()));
+        let mut app = SlideApp::new(session, services::services(dialogs.clone(), config_dir().filter(|_| prefs_enabled()).map(|d| d.join("printers"))));
         load_prefs(&mut app);
         app.integrated_titlebar = false;
         if std::env::var_os("DECKCRAFT_NO_RECOVERY").is_none() {

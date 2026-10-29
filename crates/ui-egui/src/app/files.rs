@@ -207,6 +207,26 @@ impl SlideApp {
             let bytes = deckcraft_engine::cmd::file::pdf_bytes(&doc, &params);
             return self.download(&format!("{title}.pdf"), bytes);
         }
+        if self.services.print.is_some() {
+            // A host that prints (air/OS's print kit): the same PDF, with the Print page's
+            // layout (slides, notes pages, handouts), paper and slides, goes to a printer.
+            if self.printing.is_some() {
+                self.notify("A print job is still being sent to the printer.");
+                return false;
+            }
+            let bytes = match deckcraft_engine::cmd::file::pdf_bytes(&doc, &params) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    self.notify(format!("Couldn't print: {e}"));
+                    return false;
+                }
+            };
+            if let Some(print) = self.services.print.as_mut() {
+                self.printing = Some(print(&title, bytes));
+                self.set_status("Printing…");
+            }
+            return true;
+        }
         let safe: String = title.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
         let path = std::env::temp_dir().join(format!("{safe} (print).pdf")).to_string_lossy().to_string();
         if let Some(o) = params.as_object_mut() {
@@ -221,6 +241,32 @@ impl SlideApp {
             }
             Err(_) => false,
         }
+    }
+
+    /// The outcome of the print job the host is sending, once it is known.
+    pub(super) fn poll_printing(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.printing else { return };
+        match rx.try_recv() {
+            Ok(Ok(receipt)) => {
+                self.printing = None;
+                self.notify(format!("Sent to the printer ({receipt})."));
+            }
+            Ok(Err(e)) if e.is_empty() => {
+                self.printing = None;
+                self.set_status("Printing cancelled");
+            }
+            Ok(Err(e)) => {
+                self.printing = None;
+                self.notify(format!("Couldn't print: {e}"));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(200)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.printing = None,
+        }
+    }
+
+    /// A print job is being sent to a printer ([`Services::print`]); the app shouldn't quit yet.
+    pub fn printing_busy(&self) -> bool {
+        self.printing.is_some()
     }
 
     pub(crate) fn pick_and_open(&mut self) {

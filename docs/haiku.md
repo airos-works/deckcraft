@@ -14,6 +14,7 @@ and WordCraft's recovery owner-lock fix. No sibling repository is needed to buil
 | Clipboard | `BClipboard`: text, HTML, and pictures as PNG and archived `BBitmap`s (ShowImage, Screenshot, WonderBrush, airShot) both ways |
 | Cursors / locale / document types | `BCursor`, `BLocaleRoster`, `BMimeType` |
 | Slide show | Native borderless full screen; with several monitors on one apart from the presenter view's window; restores the editor's frame |
+| Printing | The print kit (`BPrintJob`): the Print page's PDF rasterised with hayro and spooled to a printer the system's print setup picks |
 | Audio | `BSoundPlayer` (Media Kit), stereo float PCM; DeckCraft's existing decoder and mixer |
 | Movies | DeckCraft's own decoders (H.264, HEVC, VP9, AV1); others through the Media Kit (`BMediaFile`, Movies) |
 | Window | Opens where it was last closed (`window.json`), fitted onto the monitors there are now |
@@ -145,6 +146,22 @@ new changes on it; MPEG lands after the time), so a seek there decodes from the 
 The ffmpeg WebM reader's frame count is wrong (hundreds of millions); the probe uses the duration
 times the frame rate instead.
 
+## Printing
+
+File › Print prints through the Be print kit (`apps/deckcraft-haiku/src/print.rs` and
+`native/print.cpp`, WordCraft's, unchanged). The editor makes the same PDF it exports, with the
+Print page's layout (full-page slides, notes pages or handouts with 1-9 slides a page), paper,
+orientation, frame and slides, and hands it to the host through a new `Services::print` hook;
+without the hook (the other desktops) Print opens that PDF in a viewer as before. Each page is
+rasterised with hayro at the printer's resolution (at most 300 dpi), put on the printer's paper
+at its real size (shrunk when it doesn't fit; a landscape page turned on portrait paper), and
+only the strips with ink are spooled. DeckCraft's Print page has no printer list, so the
+system's print setup asks: its window has the printer menu (it remembers the printer chosen for
+DeckCraft), then that printer's paper and job setup (copies, pages, the driver's options); the
+answers are kept per printer in `~/config/settings/DeckCraft/printers`. The job is sent on a
+worker with the driver's progress window, which can cancel it; the status bar then says how many
+sheets were spooled, or that printing was cancelled. Quitting waits for a job being sent.
+
 ## Windows, the slide show and the presenter view
 
 Every egui viewport gets a native window of its own, as eframe gives them on the other desktops
@@ -258,12 +275,12 @@ nor writes it.
 ## Initial limitations
 
 - Slides are still rendered by the engine on the CPU; only the interface is drawn with Vulkan.
-- Native direct printing is not implemented; export a PDF to print through a PDF viewer.
 - The host does not expose native accessibility nodes.
 - This is the upstream alpha editor: its remaining format and editing limitations still apply.
 
 ## Revision history
 
+- 2026-10-30: printing through the print kit (#1; Printing).
 - 2026-10-30: every egui viewport in a `BWindow` of its own, the presenter view on a second
   monitor and on by default (#6; Windows, the slide show and the presenter view).
 - 2026-10-29: one running copy; Tracker's opens and later launches go to it, `--show` and a

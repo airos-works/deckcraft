@@ -225,6 +225,8 @@ pub struct SlideApp {
     pub status: Option<(String, f64)>,
     /// A presentation being read in the background, with its progress window ([`opening`]).
     pub opening: Option<opening::Opening>,
+    /// A print job the host is sending to a printer ([`Services::print`]): its outcome.
+    printing: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     /// A brief notice over the bottom of the window (missing fonts on opening a file).
     pub toast: Option<toast::Toast>,
     /// Documents (by uid) whose missing fonts have been mentioned.
