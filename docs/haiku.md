@@ -153,7 +153,7 @@ the command palette, and the command itself (still reachable from the control ch
 that SoftwareUpdater installs newer versions. The community (Discord) links in About and File ›
 Info stay; they open the web browser.
 
-## Touchpad scrolling
+## Touchpad scrolling and input methods
 
 air/OS's mouse add-on marks a touchpad's scroll gesture (`B_MOUSE_WHEEL_CHANGED` with
 `be:device_subtype` 2, the unrounded `be:wheel_precise_delta_x/y` and `be:wheel_phase`). The host
@@ -164,6 +164,17 @@ size a flick turns one slide (with the trackpad's cooldown) while a resting fing
 mouse wheel (no precise deltas) still sends whole lines, one slide per notch. The end of a
 gesture that arrives with its last movement is held for the next frame (egui drops the deltas of
 a gesture that ended). There's no pinch gesture: Command+wheel and the zoom slider zoom.
+
+The canvas view is `B_INPUT_METHOD_AWARE`: an input method (Japanese, Chinese, Korean…) composes
+in the slide's text, as upstream's IME support does on the other desktops. `CHANGED` is the
+pre-edit (its `be:selection` the active clause), `CHANGED` with `be:confirmed` the commit, and
+`STOPPED` without one drops the pre-edit. A `LOCATION_REQUEST` is answered with the caret
+(egui's `IMEOutput::cursor_rect`, on the screen) for each character, so the candidate window
+opens by it. When the editor settles a composition itself (a click elsewhere, a key, a command)
+it asks for an IME reset (`IMEOutput::reset_request`): the host sends the input method
+`B_INPUT_METHOD_STOPPED`, ignores what it sends until it starts again, and then reports the reset
+done (`Event::ImeResetCompleted`) after the input queued before it; until then the editor ignores
+the input method. With nothing to type into (no `IMEOutput`) the input method is stopped too.
 
 ## Clipboard and opening files
 
@@ -196,13 +207,17 @@ nor writes it.
 - Slides are still rendered by the engine on the CPU; only the interface is drawn with Vulkan.
 - Presenter view is embedded in the main window; a separate second-monitor presenter window
   is not implemented yet. Presenter view starts disabled to keep audience slides unobstructed.
-- Native IME composition is not forwarded yet; ordinary keyboard input and pasted Unicode work.
 - Native direct printing is not implemented; export a PDF to print through a PDF viewer.
 - The host does not expose native accessibility nodes.
 - This is the upstream alpha editor: its remaining format and editing limitations still apply.
 
 ## Revision history
 
+- 2026-10-29: input methods compose in the slide's text (#5; Touchpad scrolling and input
+  methods). `tools/haiku/input-probe.cpp` (built on air/OS with
+  `g++ -o input-probe input-probe.cpp -lbe`) sends a running copy what a test machine can't
+  produce: an input method's composition, pointer moves, touchpad gestures and wheel turns, and
+  opens files with a given copy as Tracker does.
 - 2026-10-29: a touchpad's scrolling is a trackpad's, a wheel's stays lines (#3; Touchpad
   scrolling).
 - 2026-10-29: Check for Updates says SoftwareUpdater updates the package (#4; Updates).

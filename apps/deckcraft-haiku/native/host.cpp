@@ -26,6 +26,7 @@
 #include <FindDirectory.h>
 #include <Font.h>
 #include <FormattingConventions.h>
+#include <Input.h>
 #include <InterfaceDefs.h>
 #include <Locale.h>
 #include <LocaleRoster.h>
@@ -108,6 +109,14 @@ enum {
 	DC_MOVED = 16,
 	DC_MINIMIZED = 17,
 	DC_COLORS = 18,
+	DC_IME = 19,
+};
+
+// What a DC_IME event's id says.
+enum {
+	DC_IME_PREEDIT = 1,
+	DC_IME_COMMIT = 2,
+	DC_IME_STOPPED = 3,
 };
 
 static const uint32 kDialogAnswer = 'dcDA';
@@ -191,6 +200,33 @@ PathsOf(const BMessage* message, bool documents = false)
 }
 
 
+// #pragma mark - Input methods
+
+
+// The input method transaction in progress (B_INPUT_METHOD_STARTED until
+// B_INPUT_METHOD_STOPPED): where to answer, the text being composed (an
+// answer to a location request has a point per character), and where the
+// interface's caret is (view coordinates, logical pixels; from the Rust
+// thread, dc_host_ime_caret).
+static std::mutex sImeLock;
+static BMessenger sImeMethod;
+static std::string sImeText;
+static BRect sImeCaret;
+static bool sImeCaretKnown = false;
+
+
+static int32
+CountUtf8Characters(const std::string& text)
+{
+	int32 count = 0;
+	for (size_t i = 0; i < text.size(); i++) {
+		if (((uint8)text[i] & 0xc0) != 0x80)
+			count++;
+	}
+	return count;
+}
+
+
 // #pragma mark - Direct connection
 
 
@@ -242,7 +278,8 @@ class DcView : public BView {
 public:
 	DcView(BRect frame)
 		:
-		BView(frame, "canvas", B_FOLLOW_ALL_SIDES, B_WILL_DRAW | B_FRAME_EVENTS),
+		BView(frame, "canvas", B_FOLLOW_ALL_SIDES,
+			B_WILL_DRAW | B_FRAME_EVENTS | B_INPUT_METHOD_AWARE),
 		fBitmap(NULL),
 		fScale(1)
 	{
@@ -375,6 +412,10 @@ public:
 		switch (message->what) {
 			case B_MOUSE_WHEEL_CHANGED:
 			{
+				// A wheel's whole steps, or a touchpad's scroll gesture
+				// (air/OS): its unrounded steps, and the gesture's phase in
+				// clicks (1 began, 2 changed, 3 ended). id is the device's
+				// subtype (2: touchpad), repeat 1 for the precise deltas.
 				DcEvent event = MakeEvent(DC_WHEEL);
 				message->FindInt32("be:device_subtype", &event.id);
 				float dx, dy;
@@ -396,8 +437,110 @@ public:
 			case B_MODIFIERS_CHANGED:
 				Push(MakeEvent(DC_MODIFIERS));
 				break;
+			case B_INPUT_METHOD_EVENT:
+				InputMethodEvent(message);
+				break;
 			default:
 				BView::MessageReceived(message);
+		}
+	}
+
+	// An input method composes text in the interface's own editor (the view
+	// is B_INPUT_METHOD_AWARE): its text while composing is a pre-edit, its
+	// confirmed text is typed, and its candidate window goes by the caret.
+	void InputMethodEvent(BMessage* message)
+	{
+		int32 opcode;
+		if (message->FindInt32("be:opcode", &opcode) != B_OK)
+			return;
+		switch (opcode) {
+			case B_INPUT_METHOD_STARTED:
+			{
+				BMessenger method;
+				if (message->FindMessenger("be:reply_to", &method) != B_OK)
+					break;
+				std::lock_guard<std::mutex> lock(sImeLock);
+				sImeMethod = method;
+				sImeText.clear();
+				break;
+			}
+			case B_INPUT_METHOD_CHANGED:
+			{
+				const char* string;
+				if (message->FindString("be:string", &string) != B_OK)
+					break;
+				bool confirmed;
+				if (message->FindBool("be:confirmed", &confirmed) != B_OK)
+					confirmed = false;
+				// The pre-edit's selected part (the clause being converted),
+				// in bytes: key to raw_char.
+				DcEvent event = MakeEvent(DC_IME);
+				event.id = confirmed ? DC_IME_COMMIT : DC_IME_PREEDIT;
+				event.key = -1;
+				event.raw_char = -1;
+				int32 start, end;
+				if (!confirmed
+					&& message->FindInt32("be:selection", 0, &start) == B_OK
+					&& message->FindInt32("be:selection", 1, &end) == B_OK) {
+					event.key = start;
+					event.raw_char = end;
+				}
+				std::string text(string);
+				{
+					// Only in a transaction: not after the interface stopped
+					// it (dc_host_ime_stop), as BTextView.
+					std::lock_guard<std::mutex> lock(sImeLock);
+					if (!sImeMethod.IsValid())
+						break;
+					sImeText = confirmed ? std::string() : text;
+				}
+				event.text_len = text.size();
+				Push(event, text);
+				break;
+			}
+			case B_INPUT_METHOD_STOPPED:
+			{
+				{
+					std::lock_guard<std::mutex> lock(sImeLock);
+					sImeMethod = BMessenger();
+					sImeText.clear();
+				}
+				DcEvent event = MakeEvent(DC_IME);
+				event.id = DC_IME_STOPPED;
+				Push(event);
+				break;
+			}
+			case B_INPUT_METHOD_LOCATION_REQUEST:
+			{
+				BMessenger method;
+				BRect caret;
+				int32 count;
+				{
+					std::lock_guard<std::mutex> lock(sImeLock);
+					method = sImeMethod;
+					count = CountUtf8Characters(sImeText);
+					caret = sImeCaret;
+					if (!sImeCaretKnown) {
+						// Before the interface has said: the view's corner.
+						font_height height;
+						GetFontHeight(&height);
+						caret.Set(0, 0, 0, ceilf(height.ascent + height.descent));
+					}
+				}
+				if (!method.IsValid())
+					break;
+				// A point per character, all the caret's (the interface
+				// doesn't say where each one is drawn), on the screen.
+				BMessage reply(B_INPUT_METHOD_EVENT);
+				reply.AddInt32("be:opcode", B_INPUT_METHOD_LOCATION_REQUEST);
+				BPoint where = ConvertToScreen(caret.LeftTop());
+				for (int32 i = 0; i < std::max(count, (int32)1); i++) {
+					reply.AddPoint("be:location_reply", where);
+					reply.AddFloat("be:height_reply", caret.Height());
+				}
+				method.SendMessage(&reply);
+				break;
+			}
 		}
 	}
 
@@ -424,10 +567,6 @@ public:
 			y0 = 0;
 			x1 = width;
 			y1 = height;
-				// A wheel's whole steps, or a touchpad's scroll gesture
-				// (air/OS): its unrounded steps, and the gesture's phase in
-				// clicks (1 began, 2 changed, 3 ended). id is the device's
-				// subtype (2: touchpad), repeat 1 for the precise deltas.
 		}
 		if (x0 < 0)
 			x0 = 0;
@@ -591,6 +730,11 @@ public:
 		switch (message->what) {
 			case B_COLORS_UPDATED:
 				Push(MakeEvent(DC_COLORS));
+				break;
+			case B_INPUT_METHOD_EVENT:
+				// Input methods address the focus view; what is sent to the
+				// window goes there too.
+				fView->InputMethodEvent(message);
 				break;
 			default:
 				BWindow::MessageReceived(message);
@@ -1472,6 +1616,40 @@ dc_host_file_panel(int32_t id, int32_t save, const char* name,
 	sDialogAnswered = false;
 	sOpenPanel->Show();
 	return 0;
+}
+
+
+// Where the interface's caret is, for an input method's candidate window
+// (view coordinates, logical pixels), or that there's no text to type into
+// (known 0).
+void
+dc_host_ime_caret(int32_t known, float left, float top, float right,
+	float bottom)
+{
+	std::lock_guard<std::mutex> lock(sImeLock);
+	sImeCaretKnown = known != 0;
+	sImeCaret.Set(left, top, right, bottom);
+}
+
+
+// Ends the input method's transaction, if one is in progress: the interface
+// interrupted the composition (the caret moved away, the editor lost the
+// keyboard).
+void
+dc_host_ime_stop()
+{
+	BMessenger method;
+	{
+		std::lock_guard<std::mutex> lock(sImeLock);
+		method = sImeMethod;
+		sImeMethod = BMessenger();
+		sImeText.clear();
+	}
+	if (!method.IsValid())
+		return;
+	BMessage message(B_INPUT_METHOD_EVENT);
+	message.AddInt32("be:opcode", B_INPUT_METHOD_STOPPED);
+	method.SendMessage(&message);
 }
 
 

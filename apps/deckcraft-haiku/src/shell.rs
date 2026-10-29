@@ -40,6 +40,14 @@ pub struct Shell {
     events: Vec<Event>,
     /// A touchpad gesture's end held back for the next frame (its modifiers), see [`Self::wheel`].
     wheel_end: Option<Modifiers>,
+    /// An input method is composing text (a pre-edit is shown).
+    composing: bool,
+    /// The caret last reported to the host for input methods (logical pixels).
+    ime_caret: Option<[f32; 4]>,
+    /// The editor's last IME reset request the input method was reset for, and the one whose
+    /// completion goes after the input still queued (see [`Self::input_method_output`]).
+    ime_reset: Option<egui::ImeResetId>,
+    ime_reset_done: Option<egui::ImeResetId>,
     close_requested: bool,
     quit: bool,
     /// When egui wants the next frame (from this thread's frames).
@@ -163,6 +171,10 @@ impl Shell {
             focused: true,
             events: Vec::new(),
             wheel_end: None,
+            composing: false,
+            ime_caret: None,
+            ime_reset: None,
+            ime_reset_done: None,
             close_requested: false,
             quit: false,
             repaint_at: Some(Instant::now()),
@@ -286,6 +298,11 @@ impl Shell {
             any = true;
             self.event(ev, text);
         }
+        if let Some(request_id) = self.ime_reset_done.take() {
+            // After whatever the input method sent before it was reset.
+            any = true;
+            self.events.push(Event::ImeResetCompleted { request_id });
+        }
         any
     }
 
@@ -327,6 +344,7 @@ impl Shell {
                 self.open_files(paths, ev.kind == kind::DROPPED_FILES);
                 host::window_command(WindowCommand::Activate);
             }
+            kind::IME => self.input_method(&ev, text),
             kind::COLORS => self.check_density(),
             // The next frame picks up the new size, position or state.
             kind::RESIZED | kind::MOVED | kind::MINIMIZED => {}
@@ -441,6 +459,64 @@ impl Shell {
         };
         if let Err(e) = std::thread::Builder::new().name("DeckCraft read".into()).spawn(read) {
             log::warn!("couldn't read the dropped file: {e}");
+        }
+    }
+
+    /// An input method's composition (Japanese, Chinese, Korean…) as egui's IME events: the text
+    /// being composed is shown as a pre-edit at the caret, the confirmed text is typed.
+    fn input_method(&mut self, ev: &RawEvent, text: String) {
+        use egui::ImeEvent;
+        log::debug!("input method {} {text:?}", ev.id);
+        match ev.id {
+            host::ime::PREEDIT => {
+                // The clause being converted, from bytes to characters.
+                let chars = |b: i32| usize::try_from(b).ok().and_then(|b| text.get(..b)).map(|s| s.chars().count());
+                let active_range_chars = match (chars(ev.key), chars(ev.raw_char)) {
+                    (Some(start), Some(end)) if start <= end => Some(start..end),
+                    _ => None,
+                };
+                self.composing = !text.is_empty();
+                self.events.push(Event::Ime(ImeEvent::Preedit { text, active_range_chars }));
+            }
+            host::ime::COMMIT => {
+                self.composing = false;
+                self.events.push(Event::Ime(ImeEvent::Commit(text)));
+            }
+            host::ime::STOPPED => {
+                // Stopped without confirming: the pre-edit goes.
+                if std::mem::take(&mut self.composing) {
+                    self.events.push(Event::Ime(ImeEvent::Preedit { text: String::new(), active_range_chars: None }));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Tells the input method where the caret is, and ends its composition when the editor
+    /// interrupts it or nothing takes typing any more. The editor's own interruptions (a click,
+    /// a key or a command that settles the composition) come as a reset request: the input
+    /// method is stopped, which drops what it sends until it starts again, and the editor hears
+    /// that the reset is done after the input queued before it (`Event::ImeResetCompleted`;
+    /// until then it ignores the input method).
+    fn input_method_output(&mut self, ime: Option<&egui::output::IMEOutput>) {
+        let k = self.ppp / self.dev;
+        let caret = ime.map(|o| o.cursor_rect).filter(|r| r.is_finite()).map(|r| [r.min.x * k, r.min.y * k, r.max.x * k, r.max.y * k]);
+        if caret != self.ime_caret {
+            self.ime_caret = caret;
+            host::ime_caret(caret);
+        }
+        let reset = ime
+            .and_then(|o| o.reset_request)
+            .filter(|id| id.viewport_id() == ViewportId::ROOT && self.ime_reset.is_none_or(|last| id.as_u64() > last.as_u64()));
+        if ime.is_none_or(|o| o.should_interrupt_composition) || reset.is_some() {
+            host::ime_stop();
+            if std::mem::take(&mut self.composing) {
+                self.events.push(Event::Ime(egui::ImeEvent::Preedit { text: String::new(), active_range_chars: None }));
+            }
+        }
+        if let Some(id) = reset {
+            self.ime_reset = Some(id);
+            self.ime_reset_done = Some(id);
         }
     }
 
@@ -562,6 +638,7 @@ impl Shell {
 
         // The system side of egui's output.
         host::set_cursor(cursor_id(out.platform_output.cursor_icon));
+        self.input_method_output(out.platform_output.ime.as_ref());
         for cmd in &out.platform_output.commands {
             log::debug!("output {cmd:?}");
             match cmd {
@@ -659,7 +736,7 @@ impl Shell {
             self.ppp = ppp;
             delay = Duration::ZERO;
         }
-        if !self.events.is_empty() || self.wheel_end.is_some() {
+        if !self.events.is_empty() || self.wheel_end.is_some() || self.ime_reset_done.is_some() {
             delay = Duration::ZERO;
         }
         if !self.to_type.is_empty() {
