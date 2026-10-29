@@ -1,4 +1,4 @@
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "haiku")))]
 use super::updates_ui;
 use super::{SlideApp, UI_COMMANDS, Value, ViewMode, backstage, dialogs, doc_window, json, media, qat, theme};
 
@@ -212,8 +212,11 @@ impl SlideApp {
             }
             "app.about" => self.dialog = Some(dialogs::Dialog::new("about")),
             "app.checkUpdates" => {
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(any(target_arch = "wasm32", target_os = "haiku")))]
                 updates_ui::request_check(self);
+                // air/OS installs and updates DeckCraft as a package, not from upstream's downloads.
+                #[cfg(target_os = "haiku")]
+                self.notify("DeckCraft is updated with the system's packages: SoftwareUpdater installs newer versions.");
                 #[cfg(target_arch = "wasm32")]
                 return Err("updates are handled by the browser: reload the page".into());
             }

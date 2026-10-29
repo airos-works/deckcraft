@@ -87,7 +87,13 @@ fn palette_items(session: &deckcraft_engine::Session, q: &str) -> Vec<(String, S
         // Commands that need a path or other value fail when the palette runs them with `{}`.
         .filter(|c| c.enabled && !crate::UI_COMMANDS.iter().any(|u| u.1 == c.label) && !deckcraft_engine::cmd::needs_arguments(c.params))
         .map(|c| (c.id.to_string(), c.label.to_string(), c.shortcut))
-        .chain(crate::UI_COMMANDS.iter().filter(|c| !deckcraft_engine::cmd::needs_arguments(c.3)).map(|c| (c.0.to_string(), c.1.to_string(), c.2)))
+        .chain(
+            crate::UI_COMMANDS
+                .iter()
+                // air/OS updates the package (SoftwareUpdater), not from upstream's downloads.
+                .filter(|c| !deckcraft_engine::cmd::needs_arguments(c.3) && !(cfg!(target_os = "haiku") && c.0 == "app.checkUpdates"))
+                .map(|c| (c.0.to_string(), c.1.to_string(), c.2)),
+        )
         .filter(|(id, label, _)| q.is_empty() || label.to_lowercase().contains(q) || id.to_lowercase().contains(q))
         .collect();
     items.sort_by_key(|(_, l, _)| !l.to_lowercase().starts_with(q));

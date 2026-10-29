@@ -145,6 +145,14 @@ new changes on it; MPEG lands after the time), so a seek there decodes from the 
 The ffmpeg WebM reader's frame count is wrong (hundreds of millions); the probe uses the duration
 times the frame rate instead.
 
+## Updates
+
+DeckCraft is installed and updated as a package (pkgman, SoftwareUpdater). Upstream's release
+check and downloads don't apply: the start-up check stays off, Check for Updates is left out of
+the command palette, and the command itself (still reachable from the control channel) only says
+that SoftwareUpdater installs newer versions. The community (Discord) links in About and File ›
+Info stay; they open the web browser.
+
 ## Clipboard and opening files
 
 Paste takes, in order: text (with HTML), an archived `BBitmap` ("image/bitmap", or
@@ -183,6 +191,7 @@ nor writes it.
 
 ## Revision history
 
+- 2026-10-29: Check for Updates says SoftwareUpdater updates the package (#4; Updates).
 - 2026-10-29: archived `BBitmap`s on the clipboard both ways, files dropped on the window opened
   or inserted through the editor's inbox, Tracker and command-line presentations opened in the
   background, and the window's place remembered (#8; Clipboard and opening files).

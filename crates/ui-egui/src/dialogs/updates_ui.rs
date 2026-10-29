@@ -24,7 +24,9 @@ pub(crate) fn enable(app: &mut SlideApp) {
     app.updates_rt.enabled = true;
 }
 
-/// Help > Check for Updates…: runs a check and reports the outcome either way.
+/// Help > Check for Updates…: runs a check and reports the outcome either way. air/OS updates the
+/// package with SoftwareUpdater instead, so there the command only says so.
+#[cfg(not(target_os = "haiku"))]
 pub(crate) fn request_check(app: &mut SlideApp) {
     if !matches!(app.updates_rt.updater.status(), Status::Checking) {
         app.updates_rt.check_requested = true;
