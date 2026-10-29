@@ -2193,6 +2193,39 @@ dc_host_open_url(const char* url)
 
 
 
+// Shows a path in Tracker: a folder in a window of its own, a file selected in
+// its folder's window (as Tracker's own "Open parent" does). Tracker is
+// started when it doesn't run. A path as such: BUrl takes no bare path, and a
+// file:// link of one with a space or a '#' is invalid or another path.
+int32_t
+dc_host_reveal(const char* path)
+{
+	BEntry entry(path, true);
+	entry_ref ref;
+	if (!entry.Exists() || entry.GetRef(&ref) != B_OK)
+		return -1;
+	BMessage message(B_REFS_RECEIVED);
+	if (entry.IsDirectory()) {
+		message.AddRef("refs", &ref);
+	} else {
+		BEntry parent;
+		entry_ref parentRef;
+		node_ref node;
+		if (entry.GetParent(&parent) != B_OK
+			|| parent.GetRef(&parentRef) != B_OK
+			|| entry.GetNodeRef(&node) != B_OK)
+			return -1;
+		message.AddRef("refs", &parentRef);
+		message.AddData("nodeRefToSelect", B_RAW_TYPE, &node, sizeof(node));
+	}
+	static const char* kTracker = "application/x-vnd.Be-TRAK";
+	BMessenger tracker(kTracker);
+	if (tracker.IsValid())
+		return tracker.SendMessage(&message) == B_OK ? 0 : -1;
+	return be_roster->Launch(kTracker, &message) == B_OK ? 0 : -1;
+}
+
+
 
 // Makes the application the preferred one for the types (one per line) that
 // have none yet, so Tracker opens presentations with it out of the box; a

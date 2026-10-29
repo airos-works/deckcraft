@@ -50,7 +50,12 @@ pub(super) fn info(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
             if let Some(dir) = std::path::Path::new(p).parent().and_then(std::path::Path::to_str)
                 && ui.button("Open file location").clicked()
             {
-                app.open_url(&format!("file:///{}", dir.replace('\\', "/").trim_start_matches('/')));
+                // The presentation selected in its folder where the host can show it so.
+                match app.services.reveal.as_mut().map(|reveal| reveal(p)) {
+                    Some(Ok(())) => {}
+                    Some(Err(e)) => app.set_status(e),
+                    None => app.open_url(&format!("file:///{}", dir.replace('\\', "/").trim_start_matches('/'))),
+                }
             }
         });
     }

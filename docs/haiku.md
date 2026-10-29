@@ -274,6 +274,11 @@ start onto the monitor holding most of it (air/OS's `get_display_frame`, else th
 shrunk to fit and moved in until its tab and borders show. `DECKCRAFT_NO_PREFS` neither reads
 nor writes it.
 
+File › Info › Open file location shows the presentation selected in its folder's Tracker window
+(`dc_host_reveal`, Tracker's `nodeRefToSelect`, through the `reveal` service). Upstream opens a
+`file://` link of the folder, which `BUrl` doesn't take when the path has a space and reads as
+another folder when it has a `#`.
+
 ## Initial limitations
 
 - Slides are still rendered by the engine on the CPU; only the interface is drawn with Vulkan.

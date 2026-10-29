@@ -103,6 +103,7 @@ unsafe extern "C" {
     fn dc_clipboard_set_image(text: *const c_char, text_len: usize, png: *const c_void, png_len: usize, rgba: *const u8, w: i32, h: i32) -> i32;
     fn dc_host_file_panel(id: i32, save: i32, name: *const c_char, extensions: *const c_char, title: *const c_char) -> i32;
     fn dc_host_open_url(url: *const c_char) -> i32;
+    fn dc_host_reveal(path: *const c_char) -> i32;
     fn dc_host_ime_caret(window: i32, known: i32, left: f32, top: f32, right: f32, bottom: f32);
     fn dc_host_ime_stop(window: i32);
     fn dc_host_alert(title: *const c_char, text: *const c_char);
@@ -548,6 +549,14 @@ pub fn open_url(url: &str) -> bool {
     let u = c(url);
     // SAFETY: a valid C string.
     unsafe { dc_host_open_url(u.as_ptr()) == 0 }
+}
+
+/// Shows `path` in Tracker: a folder opens, a file is selected in its folder.
+pub fn reveal(path: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(p) = CString::new(path.as_os_str().as_bytes()) else { return false };
+    // SAFETY: a valid C string.
+    unsafe { dc_host_reveal(p.as_ptr()) == 0 }
 }
 
 /// Sets a saved file's MIME type (`BEOS:TYPE`) from its extension and content, if it has none.

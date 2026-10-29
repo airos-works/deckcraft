@@ -64,4 +64,7 @@ pub struct Services {
     /// Print a PDF of File › Print's pages on a printer of the system (air/OS's print kit).
     /// Without one, Print opens that PDF in the PDF viewer to print from there.
     pub print: Option<PrintFn>,
+    /// Show a file selected in its folder in the system's file manager (air/OS's Tracker).
+    /// Without one, Info's Open file location opens the folder as a `file://` link.
+    pub reveal: Option<Box<dyn FnMut(&str) -> Result<(), String>>>,
 }

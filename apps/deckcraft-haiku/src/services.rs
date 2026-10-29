@@ -189,6 +189,12 @@ pub fn services(dialogs: Rc<Dialogs>, printers: Option<PathBuf>) -> Services {
         print: Some(Box::new(move |title, pdf| submit_print(title, pdf, printers.clone()))),
         clipboard_html: Some(Box::new(|| clip_text("text/html"))),
         clipboard_set_html: Some(Box::new(|html, text| host::clipboard_set(text, Some(html)))),
+        // File › Info › Open file location: the presentation selected in its folder's Tracker
+        // window (the file:// link of the folder it opens elsewhere is no link for BUrl when the
+        // path has a space, and another folder when it has a '#').
+        reveal: Some(Box::new(|path| {
+            if host::reveal(std::path::Path::new(path)) { Ok(()) } else { Err(format!("Couldn't show {path} in Tracker")) }
+        })),
         audio_out: std::env::var_os("DECKCRAFT_NO_AUDIO")
             .is_none()
             .then(|| Box::new(host::AudioOut::default()) as Box<dyn deckcraft_media::AudioOut>),
