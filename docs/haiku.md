@@ -260,7 +260,9 @@ and ends before it touches the log file, the preferences or the recovery records
 (`BApplication` reports `B_ALREADY_RUNNING`). They take the same path as Tracker's: in the
 background, a PowerPoint Show last starting its slide show, and `--show` opening its
 presentations at once and starting the show; other options (`--sample`, `--control`) are ignored.
-The window comes to the front, also for a launch without presentations. Closing or quitting asks
+The window comes to the front, un-minimized, also for a launch without presentations (the
+Deskbar's, `B_SILENT_RELAUNCH`, which `BApplication` alone answers by activating the team, leaving
+a minimized window down). Closing or quitting asks
 about every presentation with unsaved changes, as before. A test copy that must run beside the
 installed one runs from a file of its own (copies from different files run side by side, each
 keeping its own recovery records), and a test build gets single launch only with the resources

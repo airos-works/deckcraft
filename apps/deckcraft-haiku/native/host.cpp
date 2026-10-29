@@ -1346,6 +1346,14 @@ public:
 				// one.
 				AnswerDialog(sDialogId, false, std::string());
 				break;
+			case B_SILENT_RELAUNCH:
+				// A launch without arguments while this copy runs (the
+				// Deskbar, Tracker's icon): BApplication only activates the
+				// team, which leaves a minimized window down. The window
+				// comes forward as for opened presentations.
+				Push(MakeEvent(DC_OPEN_FILES));
+				BApplication::MessageReceived(message);
+				break;
 			default:
 				BApplication::MessageReceived(message);
 		}
