@@ -60,6 +60,19 @@ See [building and using the air/OS port](docs/haiku.md).
   <a href="#license-and-credits">License</a>
 </p>
 
+<!-- airos-ci:latest-builds:start -->
+## Latest builds
+
+Built automatically by air/OS CI from commit `aed9d0b` on 2026-10-31 ([all files](https://github.com/airos-works/deckcraft/releases/tag/latest)).
+
+| Architecture | Package |
+|---|---|
+| arm64 | [deckcraft-0.12.0.airos1-3-arm64.hpkg](https://github.com/airos-works/deckcraft/releases/download/latest/deckcraft-0.12.0.airos1-3-arm64.hpkg) |
+| x86_64 | [deckcraft-0.12.0.airos1-3-x86_64.hpkg](https://github.com/airos-works/deckcraft/releases/download/latest/deckcraft-0.12.0.airos1-3-x86_64.hpkg) |
+
+Install with `pkgman install <file>`, or copy the file into `/boot/system/packages`. Haiku SDK: x86_64 hrev60207-2163-g761d19d6d1, arm64 hrev60207-2161-g9ce0b7382e.
+<!-- airos-ci:latest-builds:end -->
+
 ## What works today
 
 DeckCraft is in alpha, heading for beta (see the [roadmap](ROADMAP.md)).
