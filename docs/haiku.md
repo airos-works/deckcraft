@@ -66,7 +66,7 @@ bash tools/haiku/package.sh --no-build
 ```
 
 Output: `target/x86_64-unknown-haiku/release/DeckCraft` and
-`artifacts/haiku/deckcraft-0.12.0~airos1-1-x86_64.hpkg`.
+`artifacts/haiku/deckcraft-0.15.0~airos1-1-x86_64.hpkg`.
 
 `tools/haiku/env.sh` sets defaults for this workspace. Override `RUSTUP_HOME`, `CARGO_HOME`,
 `HAIKU_SYSROOT`, `HAIKU_CROSS`, `CARGO_TARGET_DIR`, and `HAIKU_HOST_TOOLS` for other machines.
@@ -291,6 +291,13 @@ another folder when it has a `#`.
 
 ## Revision history
 
+- 2026-11-04: merged upstream DeckCraft 0.15.0 (storytold/deckcraft 19dceffd); package
+  `0.15.0~airos1-1`. The host needed no changes: egui and wgpu are unchanged, and upstream's
+  one new host service, the browser presenter popup (`Services::presenter`), is for the web
+  build only (the presenter view here stays a native window, Windows). Upstream's private print
+  previews are only used when the host has no print hook, and Keep Mouse Cursor Visible uses
+  the cursors the host already sets. Smoke-tested on the x399 (NVK): the sample deck, a new
+  presentation saved as PPTX, reopened and exported as PDF, File › About, and quitting.
 - 2026-10-30: printing through the print kit (#1; Printing).
 - 2026-10-30: every egui viewport in a `BWindow` of its own, the presenter view on a second
   monitor and on by default (#6; Windows, the slide show and the presenter view).

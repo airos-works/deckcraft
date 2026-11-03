@@ -1,7 +1,7 @@
 //! One background check at start-up (and on demand from Help) for a newer release, and the modal
 //! prompt that offers to update and restart. The flow itself is `craft_update::updater::Updater`.
 
-use craft_update::updater::{Action, Status, Updater};
+use craft_update::updater::{Action, Updater};
 use craft_update::{CheckResultDialog, CheckResultResponse};
 
 use crate::SlideApp;
@@ -31,7 +31,7 @@ pub(crate) fn enable(app: &mut SlideApp) {
 /// package with SoftwareUpdater instead, so there the command only says so.
 #[cfg(not(target_os = "haiku"))]
 pub(crate) fn request_check(app: &mut SlideApp) {
-    if !matches!(app.updates_rt.updater.status(), Status::Checking) {
+    if !matches!(app.updates_rt.updater.status(), craft_update::updater::Status::Checking) {
         app.updates_rt.check_requested = true;
         app.updates_rt.result_open = true;
     }
