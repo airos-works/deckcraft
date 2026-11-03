@@ -16,7 +16,7 @@ pub fn transition(w: &mut W, x: &mut Exp, o: &mut Out, t: &Transition) {
         601..=900 => "med",
         _ => "slow",
     };
-    let sound = t.sound.and_then(|m| x.media_rel(o, m, "audio").map(|r| (r, x.p.media(m).map(|i| i.name.clone()).unwrap_or_default())));
+    let sound = t.sound.and_then(|m| x.media_rel(o, m, "audio").map(|r| (r, x.media(m).map(|i| i.name.clone()).unwrap_or_default())));
     let snd = |w: &mut W| {
         if let Some((r, name)) = &sound {
             w.open0("p:sndAc");
@@ -383,7 +383,19 @@ fn behaviors(w: &mut W, x: &mut Exp, ids: &mut Ids, e: &Eff) {
                     w.close("p:animClr");
                 }
             }
-            "fillColor" | "objectColor" | "fontColor" | "lineColor" | "complementaryColor" | "darken" | "lighten" => {
+            // As PowerPoint writes them: a relative HSL shift of text, fill and line colour.
+            "darken" | "desaturate" => {
+                let (s, l) = if a.effect == "darken" { (0, -25_098) } else { (-70_588, 0) };
+                for attr in ["style.color", "fillcolor", "stroke.color"] {
+                    w.open("p:animClr", A::new().a("clrSpc", "hsl").a("dir", "cw"));
+                    cbhvr(w, ids, e, dur, None, &[attr], None);
+                    w.open0("p:by");
+                    w.empty("p:hsl", A::new().a("h", 0).a("s", s).a("l", l));
+                    w.close("p:by");
+                    w.close("p:animClr");
+                }
+            }
+            "fillColor" | "objectColor" | "fontColor" | "lineColor" | "complementaryColor" | "lighten" => {
                 let attr = match a.effect.as_str() {
                     "fontColor" => "style.color",
                     "lineColor" => "stroke.color",
