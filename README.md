@@ -63,7 +63,7 @@ See [building and using the air/OS port](docs/haiku.md).
 <!-- airos-ci:latest-builds:start -->
 ## Latest builds
 
-Built automatically by air/OS CI from commit `dfd803f` on 2026-11-03 ([all files](https://github.com/airos-works/deckcraft/releases/tag/latest)).
+Built automatically by air/OS CI from commit `19f0340` on 2026-11-04 ([all files](https://github.com/airos-works/deckcraft/releases/tag/latest)).
 
 | Architecture | Package |
 |---|---|
