@@ -149,9 +149,10 @@ stay together.
 H.264, HEVC, VP9 and AV1 in MP4/MOV/WebM/Matroska are DeckCraft's own decoders' too, but on
 air/OS the Media Kit decodes them first wherever it can (`MediaKit::open_video_first`, through
 `deckcraft_media::Platform::open_video_first`, a hook this fork adds): on one of air/OS's
-hardware decoder add-ons where the Media Kit picks one (NVDEC takes H.264 on NVIDIA cards; the
-RK3588's MPP, the Raspberry Pi's, Cedar's and Iris's add-ons theirs), otherwise with the ffmpeg
-add-on's libavcodec and dav1d. A movie the Media Kit's decoder refuses before its first picture
+hardware decoder add-ons where the Media Kit picks one (NVDEC takes H.264 on NVIDIA cards, as
+measured below; the boards' add-ons where they register their formats with the Media Kit; AMD's
+amduvd registers none, so AMD machines get libavcodec), otherwise with the ffmpeg add-on's
+libavcodec and dav1d. A movie the Media Kit's decoder refuses before its first picture
 (an NVDEC stream with fields or 4:2:2) goes back to DeckCraft's own decoder.
 `DECKCRAFT_SYSTEM_VIDEO=hardware` keeps it to hardware decoders, `0` to none.
 
