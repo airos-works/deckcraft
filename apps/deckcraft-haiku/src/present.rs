@@ -15,7 +15,7 @@
 //!   app_server moves or covers the window, so a copy never lands where another window now is.
 //! - **Readback** (the default): a compute pass compares the frame with the one app_server has
 //!   (`shown`), 64 px tile by tile; only the tiles that changed are copied back and drawn by
-//!   app_server.
+//!   app_server. The two textures are drawn into by turns, so no frame is copied between them.
 //! - **Full**: the whole frame is read back and drawn every time (the first air/OS host).
 //!
 //! `<APP>_PRESENT=direct|readback|full` picks one. Direct is not the default yet: on the
@@ -167,12 +167,28 @@ struct Frame {
     view: wgpu::TextureView,
     /// What app_server has (and `pixels` holds), for the comparison.
     shown: wgpu::Texture,
+    shown_view: wgpu::TextureView,
     shown_valid: bool,
+    /// app_server has `current` (it was read back): the next frame is drawn into `shown`
+    /// instead, and the two trade places, so no frame is copied from one to the other.
+    in_sync: bool,
     tiles: [u32; 2],
     flags: wgpu::Buffer,
     flags_read: wgpu::Buffer,
     readback: wgpu::Buffer,
+    /// Compares `current` with `shown`; `compare_back` the other way round, for after a trade.
     compare: wgpu::BindGroup,
+    compare_back: wgpu::BindGroup,
+}
+
+impl Frame {
+    /// The frame app_server has becomes `shown`, and the older one is drawn over next.
+    fn trade(&mut self) {
+        std::mem::swap(&mut self.current, &mut self.shown);
+        std::mem::swap(&mut self.view, &mut self.shown_view);
+        std::mem::swap(&mut self.compare, &mut self.compare_back);
+        self.in_sync = false;
+    }
 }
 
 /// What [`Presenter::present`] did, for the logs.
@@ -213,8 +229,8 @@ impl Presenter {
     /// For frames drawn with `device` in [`FORMAT`]. Direct presentation also needs a Vulkan
     /// device and a window that reports its direct connection (`native`).
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, mode: Mode, native: &dyn Native) -> Self {
-        let shader =
-            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("present: compare"), source: wgpu::ShaderSource::Wgsl(COMPARE.into()) });
+        let shader = device
+            .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("present: compare"), source: wgpu::ShaderSource::Wgsl(COMPARE.into()) });
         let texture = |binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -257,7 +273,13 @@ impl Presenter {
         });
         let lost = Arc::new(AtomicBool::new(false));
         let link = (mode == Mode::Direct && scanout::is_vulkan(device)).then(|| {
-            Arc::new(DirectLink { placement: Mutex::default(), device: device.clone(), last: Mutex::default(), wake: native.waker(), lost: lost.clone() })
+            Arc::new(DirectLink {
+                placement: Mutex::default(),
+                device: device.clone(),
+                last: Mutex::default(),
+                wake: native.waker(),
+                lost: lost.clone(),
+            })
         });
         native.set_direct_link(link.clone());
         let mode = if mode == Mode::Direct && link.is_none() { Mode::Readback } else { mode };
@@ -293,6 +315,10 @@ impl Presenter {
             self.frame = Some(self.make_frame(size)?);
             self.pixels.clear();
             self.pixels.resize(size[0] as usize * size[1] as usize, 0);
+        } else if let Some(frame) = self.frame.as_mut()
+            && frame.in_sync
+        {
+            frame.trade();
         }
         Ok(&self.frame.as_ref().ok_or("no frame")?.view)
     }
@@ -322,26 +348,46 @@ impl Presenter {
             })
         };
         use wgpu::TextureUsages as U;
+        // Drawn into by turns (`Frame::trade`).
         let current = texture("present: frame", U::RENDER_ATTACHMENT | U::COPY_SRC | U::TEXTURE_BINDING);
-        let shown = texture("present: shown", U::COPY_DST | U::TEXTURE_BINDING);
+        let shown = texture("present: shown", U::RENDER_ATTACHMENT | U::COPY_SRC | U::TEXTURE_BINDING);
         let view = current.create_view(&Default::default());
+        let shown_view = shown.create_view(&Default::default());
         let tiles = [w.div_ceil(crate::damage::TILE), h.div_ceil(crate::damage::TILE)];
         let flag_bytes = u64::from(tiles[0] * tiles[1]) * 4;
-        let buffer = |label, size, usage| self.device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
+        let buffer =
+            |label, size, usage| self.device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
         use wgpu::BufferUsages as B;
         let flags = buffer("present: changed tiles", flag_bytes, B::STORAGE | B::COPY_SRC);
         let flags_read = buffer("present: changed tiles read", flag_bytes, B::MAP_READ | B::COPY_DST);
         let readback = buffer("present: readback", bytes, B::MAP_READ | B::COPY_DST);
-        let compare = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("present: compare"),
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shown.create_view(&Default::default())) },
-                wgpu::BindGroupEntry { binding: 2, resource: flags.as_entire_binding() },
-            ],
-        });
-        Ok(Frame { size, current, view, shown, shown_valid: false, tiles, flags, flags_read, readback, compare })
+        let compare = |a, b| {
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("present: compare"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(a) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(b) },
+                    wgpu::BindGroupEntry { binding: 2, resource: flags.as_entire_binding() },
+                ],
+            })
+        };
+        let (compare, compare_back) = (compare(&view, &shown_view), compare(&shown_view, &view));
+        Ok(Frame {
+            size,
+            current,
+            view,
+            shown,
+            shown_view,
+            shown_valid: false,
+            in_sync: false,
+            tiles,
+            flags,
+            flags_read,
+            readback,
+            compare,
+            compare_back,
+        })
     }
 
     /// Submits `commands` (which draw the frame into [`target`](Self::target)) and shows the
@@ -375,7 +421,7 @@ impl Presenter {
         let Some(size) = self.frame.as_ref().map(|f| f.size) else { return Ok(None) };
         let (bytes_per_row, fits) = {
             let p = link.placement.lock().unwrap_or_else(PoisonError::into_inner);
-            (p.bytes_per_row, p.connected && p.size == size)
+            (p.bytes_per_row, p.connected && fits_window(p.size, size))
         };
         if !fits || !self.acquire_scanout(bytes_per_row) {
             return Ok(None);
@@ -386,12 +432,17 @@ impl Presenter {
             let Some(oldest) = self.in_flight.pop_front() else { break };
             wait_for(&self.device, &self.lost, Some(oldest), Duration::from_secs(5))?;
         }
-        if let Some(commands) = commands.take() {
+        // Nothing to submit when the last frame is shown again. An empty submission is not
+        // made at all: wgpu's waits for the submission before it, and the air/OS RADV before
+        // mesa-amdgpu 1a02b91f reported the device lost for such a wait (it has no sync files).
+        if let Some(commands) = commands.take()
+            && !commands.is_empty()
+        {
             self.queue.submit(commands);
         }
         let (Some(frame), Some(scanout)) = (&self.frame, &self.scanout) else { return Ok(None) };
         let p = link.placement.lock().unwrap_or_else(PoisonError::into_inner);
-        if !p.connected || p.size != frame.size || p.bytes_per_row != scanout.row_pitch {
+        if !p.connected || !fits_window(p.size, frame.size) || p.bytes_per_row != scanout.row_pitch {
             return Ok(None);
         }
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("present: into the screen") });
@@ -524,13 +575,6 @@ impl Presenter {
             }
             encoder.copy_buffer_to_buffer(&frame.flags, 0, &frame.flags_read, 0, None);
         }
-        if !full {
-            encoder.copy_texture_to_texture(
-                frame.current.as_image_copy(),
-                frame.shown.as_image_copy(),
-                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-            );
-        }
         commands.push(encoder.finish());
         let submission = self.queue.submit(commands);
         let rects = if compare {
@@ -543,7 +587,10 @@ impl Presenter {
         };
         self.stale_since = None;
         self.last_sync = Instant::now();
+        // Once its changed tiles are shown below, app_server has `current`: the next frame trades
+        // it for `shown` (full readbacks compare nothing).
         frame.shown_valid = !full;
+        frame.in_sync = !full;
         if rects.is_empty() {
             return Ok(Shown { wait: start.elapsed(), ..Default::default() });
         }
@@ -704,6 +751,15 @@ impl Drop for Presenter {
     fn drop(&mut self) {
         self.drop_scanout();
     }
+}
+
+/// Whether a frame of `frame` device pixels can be copied into a window app_server says is
+/// `window` device pixels. app_server rounds the window's edges to device pixels and the frame is
+/// its logical size times the scale, rounded, so at a fractional scale (175 %) they may differ by
+/// one pixel for a window that is just as large. The copies are clipped to both; a column or row
+/// of the window the frame does not reach keeps what app_server drew there.
+fn fits_window(window: [u32; 2], frame: [u32; 2]) -> bool {
+    window[0].abs_diff(frame[0]) <= 1 && window[1].abs_diff(frame[1]) <= 1
 }
 
 /// Waits until the GPU has finished `submission` (or everything). wgpu panics rather than answers
