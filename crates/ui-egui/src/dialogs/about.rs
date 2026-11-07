@@ -25,6 +25,10 @@ pub fn about(_app: &mut SlideApp, ui: &mut Ui) {
         ui.add_space(6.0);
         ui.label("Presentations and slide shows, rebuilt from scratch in pure Rust.");
         ui.label("An open-source, clean-room project. Not affiliated with Microsoft.");
+        // air/OS builds are a modified version: LICENSE-brand.txt lets them say, in plain text,
+        // what they are based on, but not present themselves as an ArtCraft product.
+        #[cfg(target_os = "haiku")]
+        ui.label("DeckCraft for air/OS is based on DeckCraft by the ArtCraft team; it is not an ArtCraft product.");
         ui.add_space(6.0);
         ui.hyperlink_to("Join our community on Discord", deckcraft_engine::links::DISCORD);
         ui.hyperlink_to("getartcraft.com/apps/deckcraft", deckcraft_engine::links::APP_PAGE);

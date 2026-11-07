@@ -345,6 +345,11 @@ another folder when it has a `#`.
 
 ## Revision history
 
+- 2026-11-07: no ArtCraft marks, as `docs/brand/LICENSE-brand.txt` requires of a published
+  modified version: the remaining mark PNGs are removed from `docs/brand/` (`docs/brand/README.md`),
+  and on air/OS About says the port is based on DeckCraft by the ArtCraft team and is not an
+  ArtCraft product (the app's logo was always DeckCraft's own); package `0.15.0~airos1-3`.
+
 - 2026-11-07: movies through the Media Kit first (hardware or libavcodec/dav1d, Movies),
   textures not copied for the rasteriser until it draws, the presenter's textures drawn by turns,
   defensive adapter choice, the RADV direct-present fix and frame pacing (Rendering); package

@@ -1,7 +1,7 @@
 # DeckCraft for air/OS
 
 This fork ports DeckCraft to air/OS using Be API windows, file panels, clipboard, cursors,
-MIME integration and Media Kit audio. It is based on DeckCraft by the ArtCraft team.
+MIME integration and Media Kit audio. It is based on [DeckCraft](https://github.com/storytold/deckcraft) by the ArtCraft team and is not an ArtCraft product.
 See [building and using the air/OS port](docs/haiku.md).
 
 <p align="center">
@@ -341,9 +341,10 @@ with its author, source and license in [ATTRIBUTION.md](ATTRIBUTION.md).
 DeckCraft's themes, layouts, shape geometry, icons and sample decks are original work, drawn or
 generated in code; no proprietary artwork, fonts, themes or templates are used.
 
-The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are trademarks of the
-ArtCraft Team and are not covered by this license. They may be used only unmodified, and only as
-part of this repository and DeckCraft, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
-Forks and modified versions must remove them.
+The ArtCraft name, wordmark and logos are trademarks of the ArtCraft Team and are not covered by
+this license. This fork is a modified version, so as [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt)
+requires, the marks have been removed from it ([`docs/brand/README.md`](docs/brand/README.md)).
+DeckCraft for air/OS is based on [DeckCraft](https://github.com/storytold/deckcraft) by the
+[ArtCraft](https://getartcraft.com/) team. It is not an ArtCraft product.
 
 <sub>Microsoft and PowerPoint are trademarks of the Microsoft group of companies. Adobe, Photoshop, Illustrator, Premiere Pro, Lightroom, Acrobat, After Effects and InDesign are trademarks or registered trademarks of Adobe Inc. in the United States and/or other countries. DeckCraft is an independent, open-source project and is not affiliated with, sponsored by or endorsed by Microsoft Corporation or Adobe Inc.; these names are used only to describe the workflows it is compatible with.</sub>
