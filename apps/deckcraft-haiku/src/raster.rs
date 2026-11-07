@@ -13,9 +13,10 @@
 //! its own, which remembers its last frame to tell what changed.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use egui::epaint::{ClippedPrimitive, ImageData, ImageDelta, Mesh, Primitive, Vertex};
-use egui::{Color32, TextureFilter, TextureId, TexturesDelta};
+use egui::{Color32, ColorImage, TextureFilter, TextureId, TexturesDelta};
 use rayon::prelude::*;
 
 /// Rows per band.
@@ -78,6 +79,10 @@ struct Item {
 /// egui's textures, which every window's frames draw from.
 pub struct Rasterizer {
     textures: HashMap<TextureId, Texture>,
+    /// Whole images egui sent and no frame drawn here has used yet, kept as egui's (shared, not
+    /// copied; with their filtering and version): while the GPU draws, a playing movie's picture
+    /// costs nothing here.
+    deferred: HashMap<TextureId, (Arc<ColorImage>, bool, u64)>,
     versions: u64,
 }
 
@@ -135,7 +140,7 @@ impl Canvas {
 
 impl Rasterizer {
     pub fn new() -> Self {
-        Self { textures: HashMap::new(), versions: 0 }
+        Self { textures: HashMap::new(), deferred: HashMap::new(), versions: 0 }
     }
 
     /// Applies the texture uploads of a frame (before drawing it).
@@ -151,24 +156,27 @@ impl Rasterizer {
     pub fn free_textures(&mut self, ids: &[TextureId]) {
         for id in ids {
             self.textures.remove(id);
+            self.deferred.remove(id);
         }
     }
 
     fn set_texture(&mut self, id: TextureId, d: &ImageDelta) {
         let ImageData::Color(image) = &d.image;
-        let [w, h] = image.size;
         let linear = d.options.magnification == TextureFilter::Linear;
-        let px: Vec<[u8; 4]> = image.pixels.iter().map(|c| c.to_array()).collect();
-        if px.len() != w.saturating_mul(h) {
-            return;
-        }
         self.versions += 1;
         let version = self.versions;
         match d.pos {
             None => {
-                self.textures.insert(id, Texture { w, h, px, linear, version });
+                self.textures.remove(&id);
+                self.deferred.insert(id, (image.clone(), linear, version));
             }
             Some([x, y]) => {
+                self.materialize(id);
+                let [w, h] = image.size;
+                let px: Vec<[u8; 4]> = image.pixels.iter().map(|c| c.to_array()).collect();
+                if px.len() != w.saturating_mul(h) {
+                    return;
+                }
                 let Some(t) = self.textures.get_mut(&id) else { return };
                 t.linear = linear;
                 t.version = version;
@@ -187,9 +195,23 @@ impl Rasterizer {
         }
     }
 
+    /// A deferred whole image as the rasteriser's texture.
+    fn materialize(&mut self, id: TextureId) {
+        let Some((image, linear, version)) = self.deferred.remove(&id) else { return };
+        let [w, h] = image.size;
+        let px: Vec<[u8; 4]> = image.pixels.iter().map(|c| c.to_array()).collect();
+        if px.len() == w.saturating_mul(h) {
+            self.textures.insert(id, Texture { w, h, px, linear, version });
+        }
+    }
+
     /// Draws a frame of `size` pixels over `clear` into `canvas`, returning the rectangle that
     /// changed since its previous frame ([x0, y0, x1, y1)), or `None` when nothing did.
-    pub fn render(&self, canvas: &mut Canvas, size: [usize; 2], prims: &[ClippedPrimitive], ppp: f32, clear: Color32) -> Option<[usize; 4]> {
+    pub fn render(&mut self, canvas: &mut Canvas, size: [usize; 2], prims: &[ClippedPrimitive], ppp: f32, clear: Color32) -> Option<[usize; 4]> {
+        let deferred: Vec<TextureId> = self.deferred.keys().copied().collect();
+        for id in deferred {
+            self.materialize(id);
+        }
         let (w, h) = (size[0].min(MAX_SIDE), size[1].min(MAX_SIDE));
         if w == 0 || h == 0 {
             return None;

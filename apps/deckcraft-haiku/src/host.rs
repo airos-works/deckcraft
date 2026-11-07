@@ -92,6 +92,7 @@ unsafe extern "C" {
     fn dc_host_modifiers() -> u32;
     fn dc_host_ui_scale() -> f32;
     fn dc_host_device_scale() -> f32;
+    fn dc_host_refresh_rate() -> f32;
     fn dc_host_dark() -> i32;
     fn dc_host_monitors(rects: *mut f32, max: i32) -> i32;
     fn dc_host_locale(languages: *mut *mut c_char) -> *mut c_char;
@@ -401,6 +402,23 @@ pub fn ui_scale() -> f32 {
     unsafe { dc_host_ui_scale() }
 }
 
+/// The shortest time between two frames of a window: one refresh of the main screen (60 Hz
+/// when it isn't known; `DECKCRAFT_MAX_FPS` sets another rate, 0 none). Haiku has no vertical
+/// sync for a window's bitmap, and egui asks for the next frame as soon as the last is out
+/// while something moves (an animation, a playing movie), which can draw hundreds of frames a
+/// second, each no different on the screen.
+pub fn frame_interval() -> std::time::Duration {
+    let fps = match std::env::var("DECKCRAFT_MAX_FPS").ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|f| f.is_finite() && *f >= 0.0) {
+        Some(fps) => fps,
+        None => {
+            // SAFETY: no arguments.
+            let hz = unsafe { dc_host_refresh_rate() };
+            if hz.is_finite() && (24.0..=500.0).contains(&hz) { hz } else { 60.0 }
+        }
+    };
+    if fps < 1.0 { std::time::Duration::ZERO } else { std::time::Duration::from_secs_f32(1.0 / fps.min(1000.0)) }
+}
+
 /// Frame buffer pixels per logical pixel: air/OS draws the desktop at its monitors' density
 /// (2 at 200 %); 1 elsewhere. `DECKCRAFT_DEVICE_SCALE` overrides it.
 pub fn device_scale() -> f32 {
@@ -678,7 +696,17 @@ impl MediaKitInfo {
 
 unsafe extern "C" {
     fn dc_media_probe(data: *const c_void, len: usize, info: *mut MediaKitInfo) -> i32;
-    fn dc_video_open(data: *const c_void, len: usize, width: *mut i32, height: *mut i32, container: *mut c_char) -> *mut c_void;
+    fn dc_video_open(
+        data: *const c_void,
+        len: usize,
+        width: *mut i32,
+        height: *mut i32,
+        container: *mut c_char,
+        decoder: *mut c_char,
+        hardware: *mut i32,
+    ) -> *mut c_void;
+    fn dc_hardware_video_installed() -> i32;
+    fn dc_team_cpu_us() -> i64;
     fn dc_video_next(video: *mut c_void, rgba: *mut u8, len: usize, time_us: *mut i64) -> i32;
     fn dc_video_seek(video: *mut c_void, time_us: i64) -> i64;
     fn dc_video_close(video: *mut c_void);
@@ -710,6 +738,18 @@ pub fn media_audio(data: &[u8], max_samples: usize) -> Option<(u16, u32, Vec<f32
     ((1.0..=768_000.0).contains(&rate) && channels > 0).then(|| (u16::try_from(channels).unwrap_or(1), rate as u32, samples))
 }
 
+/// Whether one of air/OS's hardware video decoder add-ons is installed.
+pub fn hardware_video_installed() -> bool {
+    // SAFETY: no arguments; the host only looks at the media plugin folders.
+    unsafe { dc_hardware_video_installed() != 0 }
+}
+
+/// The processor time the team has used so far.
+pub fn team_cpu_time() -> std::time::Duration {
+    // SAFETY: no arguments.
+    std::time::Duration::from_micros(u64::try_from(unsafe { dc_team_cpu_us() }).unwrap_or(0))
+}
+
 /// A video track the Media Kit decodes, frame by frame.
 pub struct MediaKitVideo {
     handle: std::ptr::NonNull<c_void>,
@@ -719,6 +759,10 @@ pub struct MediaKitVideo {
     pub height: u32,
     /// The reader's name for the container, as [`MediaKitInfo::container`].
     pub container: String,
+    /// The decoder's short name (`media_codec_info`).
+    pub decoder: String,
+    /// The decoder is a hardware add-on's (NVDEC, VA-API, MPP…).
+    pub hardware: bool,
 }
 
 // SAFETY: the native decoder has no thread affinity; `&mut self` keeps it to one thread at a time.
@@ -726,13 +770,21 @@ unsafe impl Send for MediaKitVideo {}
 
 impl MediaKitVideo {
     pub fn open(bytes: std::sync::Arc<Vec<u8>>) -> Option<Self> {
-        let (mut w, mut h, mut container) = (0i32, 0i32, [0 as c_char; 32]);
+        let (mut w, mut h, mut container, mut decoder, mut hardware) = (0i32, 0i32, [0 as c_char; 32], [0 as c_char; 32], 0i32);
         // SAFETY: the bytes stay alive (in `_bytes`) until the handle is closed in `drop`; the
-        // host writes at most 32 bytes of container name.
-        let p = unsafe { dc_video_open(bytes.as_ptr().cast(), bytes.len(), &mut w, &mut h, container.as_mut_ptr()) };
+        // host writes at most 32 bytes of container and of decoder name.
+        let p =
+            unsafe { dc_video_open(bytes.as_ptr().cast(), bytes.len(), &mut w, &mut h, container.as_mut_ptr(), decoder.as_mut_ptr(), &mut hardware) };
         let handle = std::ptr::NonNull::new(p)?;
-        let container = MediaKitInfo::text(&container);
-        Some(Self { handle, _bytes: bytes, width: u32::try_from(w).unwrap_or(0), height: u32::try_from(h).unwrap_or(0), container })
+        Some(Self {
+            handle,
+            _bytes: bytes,
+            width: u32::try_from(w).unwrap_or(0),
+            height: u32::try_from(h).unwrap_or(0),
+            container: MediaKitInfo::text(&container),
+            decoder: MediaKitInfo::text(&decoder),
+            hardware: hardware != 0,
+        })
     }
 
     /// Decodes the next frame into `rgba` (resized to width × height × 4): its time in

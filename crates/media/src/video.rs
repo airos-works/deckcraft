@@ -474,12 +474,17 @@ impl crate::VideoSource for VideoDecoder {
     }
 }
 
-/// The video track's decoder: ours, else the host's ([`crate::platform`]) for a codec or
-/// container we don't read.
+/// The video track's decoder: the host's hardware one where it offers one
+/// ([`crate::Platform::open_video_first`]), else ours, else the host's ([`crate::platform`]) for
+/// a codec or container we don't read.
 pub fn open_video(bytes: Bytes) -> Result<Box<dyn crate::VideoSource>> {
+    let platform = crate::platform::get();
+    if let Some(Ok(first)) = platform.and_then(|p| p.open_video_first(&bytes)) {
+        return Ok(first);
+    }
     match VideoDecoder::open(bytes.clone()) {
         Ok(d) => Ok(Box::new(d)),
-        Err(e) => crate::platform::get().and_then(|p| p.open_video(&bytes)).unwrap_or(Err(e)),
+        Err(e) => platform.and_then(|p| p.open_video(&bytes)).unwrap_or(Err(e)),
     }
 }
 

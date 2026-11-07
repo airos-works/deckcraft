@@ -340,8 +340,14 @@ impl Platform for Haiku {
     }
 
     fn set_textures(&mut self, delta: &egui::TexturesDelta) {
-        // The rasteriser keeps them too, to take over from a failed GPU.
+        if delta.set.is_empty() {
+            return;
+        }
+        let start = Instant::now();
+        // The rasteriser keeps them too, to take over from a failed GPU (whole images only as
+        // egui's, until it draws).
         self.raster.set_textures(delta);
+        let mirrored = start.elapsed();
         if let Some(gpu) = &mut self.gpu
             && let Err(e) = guard("GPU textures", || {
                 gpu.set_textures(delta);
@@ -350,6 +356,13 @@ impl Platform for Haiku {
         {
             self.drop_gpu(&e);
         }
+        let pixels: usize = delta.set.iter().flat_map(|(_, d)| d.iter()).map(|d| d.image.width() * d.image.height()).sum();
+        log::debug!(
+            "textures: {} uploads, {pixels} px: rasteriser {:.1} ms, GPU {:.1} ms",
+            delta.set.len(),
+            mirrored.as_secs_f64() * 1e3,
+            (start.elapsed() - mirrored).as_secs_f64() * 1e3
+        );
     }
 
     fn free_textures(&mut self, ids: &[egui::TextureId]) {

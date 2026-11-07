@@ -2,7 +2,8 @@
 //! MPEG-4 Part 2, Windows Media, Theora, VP8…). A host may register one [`Platform`] when it
 //! starts (the air/OS host: the Media Kit). Probing, audio decoding and video decoding try
 //! DeckCraft's own code first and ask the platform only for what that couldn't read, so a file
-//! DeckCraft decodes itself plays the same everywhere.
+//! DeckCraft decodes itself plays the same everywhere; only a video decoder the platform offers
+//! first ([`Platform::open_video_first`], a hardware one) goes before DeckCraft's.
 
 use std::sync::OnceLock;
 
@@ -26,6 +27,12 @@ pub trait Platform: Send + Sync {
     fn decode_audio(&self, bytes: &Bytes) -> Option<Result<Pcm>>;
     /// The video track's decoder.
     fn open_video(&self, bytes: &Bytes) -> Option<Result<Box<dyn VideoSource>>>;
+    /// A decoder to use before DeckCraft's own, for a video DeckCraft also reads: one that takes
+    /// the work off the processor (the air/OS host: a hardware decoder add-on). `None` (the
+    /// default) leaves the video to DeckCraft's decoders.
+    fn open_video_first(&self, _bytes: &Bytes) -> Option<Result<Box<dyn VideoSource>>> {
+        None
+    }
 }
 
 static PLATFORM: OnceLock<Box<dyn Platform>> = OnceLock::new();

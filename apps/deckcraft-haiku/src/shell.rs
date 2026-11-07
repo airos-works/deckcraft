@@ -31,6 +31,10 @@ pub struct Shell {
     ui_scale: f32,
     dev: f32,
     dev_checked: Instant,
+    /// When the main window's last frame started, and the shortest time between two
+    /// ([`host::frame_interval`]).
+    last_frame: Instant,
+    min_interval: Duration,
     quit: bool,
     /// Files were opened from Tracker or a later launch: the next frame brings the window forward.
     activate: bool,
@@ -63,6 +67,8 @@ impl Shell {
             ui_scale,
             dev,
             dev_checked: Instant::now(),
+            last_frame: Instant::now(),
+            min_interval: host::frame_interval(),
             quit: false,
             activate: false,
             copied_shapes,
@@ -85,6 +91,13 @@ impl Shell {
             }
             for viewport in self.viewports.take_due() {
                 if viewport == ViewportId::ROOT {
+                    // At most one frame a refresh: the input waits in the viewports until then.
+                    let since = self.last_frame.elapsed();
+                    if since < self.min_interval {
+                        self.viewports.request(ViewportId::ROOT, self.min_interval - since);
+                        continue;
+                    }
+                    self.last_frame = Instant::now();
                     self.frame();
                 } else if self.viewports.run_deferred(viewport).close_root {
                     self.quit = true;
@@ -254,7 +267,8 @@ impl Shell {
         let t1 = Instant::now();
         self.type_saved_files();
         // Honor the editor's unsaved-changes prompt before accepting a native close.
-        let cancelled = out.viewport_output.get(&ViewportId::ROOT).is_some_and(|vp| vp.commands.iter().any(|c| matches!(c, ViewportCommand::CancelClose)));
+        let cancelled =
+            out.viewport_output.get(&ViewportId::ROOT).is_some_and(|vp| vp.commands.iter().any(|c| matches!(c, ViewportCommand::CancelClose)));
         let closed = self.viewports.finish(ViewportId::ROOT, out).close_root;
         if (close || closed) && !cancelled {
             self.quit = true;
@@ -352,4 +366,3 @@ fn is_presentation(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     [".deckcraft", ".slidecraft", ".pptx", ".potx", ".ppsx"].iter().any(|e| lower.ends_with(e))
 }
-

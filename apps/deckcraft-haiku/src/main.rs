@@ -286,6 +286,12 @@ OPTIONS:
                 let _ = std::io::Write::write_fmt(&mut std::io::stderr(), format_args!("DeckCraft: {report}\n"));
             }
         }));
+        // Measuring the video decoders (docs/haiku.md): no window, no single launch.
+        let argv: Vec<String> = std::env::args().skip(1).collect();
+        if argv.first().map(String::as_str) == Some("--bench-video") {
+            media_kit::bench(&argv[1..]);
+            std::process::exit(0);
+        }
         let args = args();
         // Before the log file, the preferences or the recovery records are touched: a second
         // launch (from Terminal; Tracker hands presentations to the running copy itself) passes

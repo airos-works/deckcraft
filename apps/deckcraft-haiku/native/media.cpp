@@ -11,10 +11,15 @@
  */
 
 #include <DataIO.h>
+#include <FindDirectory.h>
 #include <MediaDefs.h>
 #include <MediaFile.h>
 #include <MediaFormats.h>
 #include <MediaTrack.h>
+#include <OS.h>
+#include <Path.h>
+#include <StorageDefs.h>
+#include <sys/stat.h>
 
 #include <new>
 #include <stdlib.h>
@@ -160,6 +165,30 @@ CodecName(BMediaTrack* track, char* name, size_t size)
 }
 
 
+// The decoders of air/OS's hardware video add-ons, by the start of the
+// short name they give (media_codec_info): NVIDIA's NVDEC, AMD's UVD/VCN
+// through VA-API, the RK3588's MPP, the Raspberry Pi's VideoCore and HEVC
+// blocks, Allwinner's Cedar and Qualcomm's Iris. Every other decoder (the
+// ffmpeg add-on's) decodes on the processor.
+const char* const kHardwareDecoders[] = { "nvdec", "amduvd", "rk3588_mpp",
+	"rpi_mmal", "rpi_hevc", "sunxi_cedar", "qcom_video" };
+
+// The add-ons' file names in the media plugin folders.
+const char* const kHardwareAddOns[] = { "nvdec", "amduvd", "00_rockchip_mpp",
+	"rpi_mmal", "rpi_hevc", "00_sunxi_cedar", "00_qcom_video" };
+
+
+bool
+IsHardwareDecoder(const char* shortName)
+{
+	for (const char* prefix : kHardwareDecoders) {
+		if (strncmp(shortName, prefix, strlen(prefix)) == 0)
+			return true;
+	}
+	return false;
+}
+
+
 // A video track being played: the decoder, and a buffer for its frames.
 struct Video {
 	Source* source;
@@ -228,15 +257,18 @@ dc_media_probe(const void* data, size_t length, DcMediaInfo* info)
 
 
 // Opens the video track of data for decoding to B_RGB32 frames of
-// *width × *height, and names the container (32 bytes). NULL when there's
-// none the Media Kit decodes.
+// *width × *height, and names the container and the decoder (32 bytes
+// each); *hardware is 1 when the decoder is a hardware add-on's. NULL when
+// there's none the Media Kit decodes.
 void*
 dc_video_open(const void* data, size_t length, int32_t* width,
-	int32_t* height, char* container)
+	int32_t* height, char* container, char* decoder, int32_t* hardware)
 {
 	*width = 0;
 	*height = 0;
+	*hardware = 0;
 	container[0] = '\0';
+	decoder[0] = '\0';
 	Source* source = OpenSource(data, length);
 	if (source == NULL)
 		return NULL;
@@ -262,6 +294,11 @@ dc_video_open(const void* data, size_t length, int32_t* width,
 		source->file.ReleaseTrack(track);
 		delete source;
 		return NULL;
+	}
+	media_codec_info codec;
+	if (track->GetCodecInfo(&codec) == B_OK) {
+		strlcpy(decoder, codec.short_name, 32);
+		*hardware = IsHardwareDecoder(codec.short_name) ? 1 : 0;
 	}
 	video->source = source;
 	video->track = track;
@@ -298,13 +335,13 @@ dc_video_next(void* handle, uint8_t* rgba, size_t length, int64_t* time)
 		const uint8* in = video->buffer + (size_t)y * video->bytesPerRow;
 		uint8* out = rgba + (size_t)y * video->width * 4;
 		for (uint32 x = 0; x < video->width; x++) {
-			// B_RGB32 is B, G, R, unused in memory.
-			out[0] = in[2];
-			out[1] = in[1];
-			out[2] = in[0];
-			out[3] = 255;
-			in += 4;
-			out += 4;
+			// B_RGB32 is B, G, R, unused in memory; RGBA is R, G, B, A. As
+			// whole pixels (little endian), which the compiler vectorises.
+			uint32 pixel;
+			memcpy(&pixel, in + x * 4, 4);
+			pixel = 0xff000000 | (pixel & 0x0000ff00) | ((pixel & 0xff) << 16)
+				| ((pixel >> 16) & 0xff);
+			memcpy(out + x * 4, &pixel, 4);
 		}
 	}
 	return 1;
@@ -323,6 +360,44 @@ dc_video_seek(void* handle, int64_t time)
 		video->track->SeekToTime(&at, B_MEDIA_SEEK_CLOSEST_BACKWARD);
 	}
 	return at;
+}
+
+
+// Whether any of air/OS's hardware video add-ons is installed (in any of
+// the media plugin folders). Without one, no decoder the Media Kit picks is
+// a hardware one.
+int32_t
+dc_hardware_video_installed()
+{
+	char** paths = NULL;
+	size_t count = 0;
+	if (find_paths(B_FIND_PATH_ADD_ONS_DIRECTORY, "media/plugins", &paths,
+			&count) != B_OK)
+		return 0;
+	int32_t found = 0;
+	for (size_t i = 0; i < count && !found; i++) {
+		for (const char* name : kHardwareAddOns) {
+			BPath path(paths[i], name);
+			struct stat st;
+			if (path.InitCheck() == B_OK && stat(path.Path(), &st) == 0) {
+				found = 1;
+				break;
+			}
+		}
+	}
+	free(paths);
+	return found;
+}
+
+
+// The processor time this team has used, in microseconds (for --bench-video).
+int64_t
+dc_team_cpu_us()
+{
+	team_usage_info usage;
+	if (get_team_usage_info(B_CURRENT_TEAM, B_TEAM_USAGE_SELF, &usage) != B_OK)
+		return 0;
+	return usage.user_time + usage.kernel_time;
 }
 
 

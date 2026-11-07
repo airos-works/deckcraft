@@ -56,6 +56,24 @@ picks how frames reach the window (`readback`, the default; `full`, the whole fr
 few seconds after the import). wgpu's Vulkan backend is enabled for Haiku by the vendored
 `wgpu`, `wgpu-core` and `wgpu-core-deps-windows-linux-android` 30.0.1 (`vendor/README.md`).
 
+What upstream's desktop build draws on the GPU (egui's meshes, which include the slide show's
+transitions: `deckcraft_anim::transition_layers` drawn as textured egui meshes, and the presenter
+view, an egui viewport) is drawn with wgpu here too; the slides themselves are rendered on the
+processor by vello_cpu into textures on every platform. Since 2026-11-07 (package
+`0.15.0~airos1-2`), as in WordCraft's host (docs there):
+
+- the presenter draws into its two textures by turns instead of copying each frame into
+  app_server's (4.6-4.8 ms -> 2.9 ms per small change on the x399 in WordCraft);
+- Vulkan adapters left out are logged with the reason, and the device asks for wgpu's
+  downlevel limits with the adapter's texture sizes (arm64 boards' smaller GPUs, V3DV's
+  4096 px textures, are no longer refused);
+- showing the last frame again never submits an empty wgpu batch (the air/OS RADV before
+  mesa-amdgpu 1a02b91f lost the device on its wait), and a frame within a pixel of the window
+  (175 %) still goes direct;
+- the windows draw at most one frame per refresh of the main screen (60 Hz when unknown;
+  `DECKCRAFT_MAX_FPS` sets another rate, `0` none): a slide show transition drew 600 frames in
+  one second on the x399 before, 71 with the 85 Hz screen it had.
+
 ## Build
 
 Use the existing Linux cross toolchain and air/OS development sysroot:
@@ -126,7 +144,33 @@ Movies embedded in slides play in the editor and the slide show with the movie's
 (play/pause, seek, loop, trim, fades), as on the other platforms: upstream's `VideoFeed` decodes
 ahead of the playback clock on a worker thread and the frame due at the clock's time becomes the
 shape's egui texture. The clock is the audio callback's (`BSoundPlayer`), so picture and sound
-stay together. H.264, HEVC, VP9 and AV1 in MP4/MOV/WebM/Matroska use DeckCraft's own decoders.
+stay together.
+
+H.264, HEVC, VP9 and AV1 in MP4/MOV/WebM/Matroska are DeckCraft's own decoders' too, but on
+air/OS the Media Kit decodes them first wherever it can (`MediaKit::open_video_first`, through
+`deckcraft_media::Platform::open_video_first`, a hook this fork adds): on one of air/OS's
+hardware decoder add-ons where the Media Kit picks one (NVDEC takes H.264 on NVIDIA cards; the
+RK3588's MPP, the Raspberry Pi's, Cedar's and Iris's add-ons theirs), otherwise with the ffmpeg
+add-on's libavcodec and dav1d. A movie the Media Kit's decoder refuses before its first picture
+(an NVDEC stream with fields or 4:2:2) goes back to DeckCraft's own decoder.
+`DECKCRAFT_SYSTEM_VIDEO=hardware` keeps it to hardware decoders, `0` to none.
+
+Measured on the x399 (Threadripper 1950X, GTX 1070 with the nvdec add-on, hrev60207+2472;
+`DeckCraft --bench-video FILE…` decodes up to 600 pictures with each and prints time,
+processor time and how far the two 60th pictures are apart):
+
+| 1080p movie | DeckCraft's decoder | the Media Kit | 60th pictures apart (of 255) |
+| --- | --- | --- | --- |
+| H.264 (MP4) | 23.8 pictures/s, 80 ms processor each | 67 pictures/s, 23 ms (NVDEC) | 0.02 average, 1 at most |
+| HEVC (MP4) | 16.9/s, 90 ms | 88/s, 21 ms (libavcodec) | 1.5, 25 |
+| VP9 (WebM) | 26.9/s, 70 ms | 95/s, 20 ms (libavcodec) | 1.5, 26 |
+| AV1 (Matroska) | 19.0/s, 87 ms | 88/s, 21 ms (dav1d) | 1.5, 26 |
+
+(the libavcodec pictures differ from DeckCraft's by swscale's conversion to RGB, not by
+decoding). In the editor, the same 1080p30 H.264 movie playing on a slide showed 2 pictures a
+second with DeckCraft's decoder (whose work stays on one thread there) and 21-22 a second
+through the Media Kit (the movie has 30: the interface thread, which turns each picture into an
+egui texture in upstream's code, now takes about 30 ms a picture and is the limit).
 
 Everything else goes through the Media Kit (`apps/deckcraft-haiku/native/media.cpp`,
 `src/media_kit.rs`), registered with `deckcraft_media::platform` when the app starts: probing,
@@ -165,6 +209,15 @@ libprint's PostScript and PCL drivers start in monochrome: choose Color in the j
 print server's setup window starts the driver's job setup from its own settings for the printer
 (remembered there), not the application's, so the colour option WordCraft's backend has
 (`Options::color`, set for DeckCraft's jobs) only takes effect when a job names a printer.
+
+### Host costs while a movie plays (2026-11-07)
+
+Every new picture of a playing movie is a whole egui texture. The software rasteriser kept a
+converted copy of every texture egui sent, to take over if the GPU fails: 8 MB allocated and
+converted for each 1080p picture. It now keeps whole images as egui's (shared, not copied) and
+converts them only when it draws; the interface's output and drawing went from 18-42 ms to
+7 ms a frame while the movie above played. `RUST_LOG=DeckCraft=debug` logs each frame's texture
+uploads (rasteriser and GPU time).
 
 ## Windows, the slide show and the presenter view
 
@@ -290,6 +343,11 @@ another folder when it has a `#`.
 - This is the upstream alpha editor: its remaining format and editing limitations still apply.
 
 ## Revision history
+
+- 2026-11-07: movies through the Media Kit first (hardware or libavcodec/dav1d, Movies),
+  textures not copied for the rasteriser until it draws, the presenter's textures drawn by turns,
+  defensive adapter choice, the RADV direct-present fix and frame pacing (Rendering); package
+  `0.15.0~airos1-2`.
 
 - 2026-11-04: merged upstream DeckCraft 0.15.0 (storytold/deckcraft 19dceffd); package
   `0.15.0~airos1-1`. The host needed no changes: egui and wgpu are unchanged, and upstream's
